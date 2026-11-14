@@ -1,0 +1,5 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+data/alerts_log.jsonl
