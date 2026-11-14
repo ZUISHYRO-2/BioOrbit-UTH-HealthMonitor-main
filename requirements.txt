@@ -2,8 +2,8 @@
 # NASA Space Apps Challenge 2026 - Reto: Create Health Monitoring Software for Astronauts on Space Missions
 numpy>=1.26.0
 pandas>=2.1.0
-scipy>=1.11.0
-opencv-python>=4.8.0
+# OpenCV 5 ya no trae el detector facial Haar: se fija la versión 4
+opencv-python>=4.8.0,<5
 matplotlib>=3.8.0
 requests>=2.31.0
 streamlit>=1.67.0

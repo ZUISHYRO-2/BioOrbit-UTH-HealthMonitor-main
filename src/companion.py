@@ -1,21 +1,27 @@
 """
-ORBI - compañero virtual de apoyo emocional para la tripulación.
+Luma - compañero virtual de apoyo emocional para la tripulación.
 
 Funciona sin internet con reglas empáticas. Si defines ANTHROPIC_API_KEY, usa un modelo
 de lenguaje para conversar con más naturalidad (se envían al servicio el texto del chat y
 un resumen de biometría, así que actívalo solo con consentimiento de la persona).
 Si ocurre cualquier error de red, vuelve automáticamente a las reglas.
 
-ORBI es un acompañante, no un profesional de salud mental: no diagnostica y, ante señales
+Luma es un acompañante, no un profesional de salud mental: no diagnostica y, ante señales
 de crisis, pide apoyo humano de inmediato.
 """
 
+import json
 import os
 import random
 import re
+import tempfile
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
+
+NAME = "Luma"
 
 CRISIS = re.compile(
     r"suicid|quitarme la vida|matarme|no quiero vivir|hacerme da[ñn]o|terminar con todo|mejor muerto",
@@ -63,7 +69,7 @@ CRISIS_TEXT = (
 )
 
 SYSTEM = (
-    "Eres ORBI, un compañero virtual amistoso para tripulantes de misiones espaciales. Hablas en español, "
+    "Eres Luma, un pequeño robot compañero amistoso para tripulantes de misiones espaciales. Hablas en español, "
     "con calidez y frases cortas (máximo 4). Escuchas primero, validas emociones sin reforzar ideas dañinas "
     "y propones UNA acción pequeña (respirar, hablar con un compañero, descansar). No diagnosticas ni "
     "sustituyes a un profesional. Si hay riesgo de autolesión, pide apoyo humano inmediato. "
@@ -101,7 +107,7 @@ def body_hint(row) -> str:
 
 
 def greeting(who: str, row) -> str:
-    base = f"¡Hola, {who}! Soy ORBI, tu compañero a bordo. Puedes contarme cómo te sientes cuando quieras."
+    base = f"¡Hola, {who}! Soy Luma, tu compañero a bordo. Puedes contarme cómo te sientes cuando quieras."
     hint = body_hint(row)
     return f"{base} {hint}" if hint else base
 
@@ -144,3 +150,127 @@ def reply(text: str, who: str, row, history) -> Reply:
         if hint:
             msg = f"{msg} {hint}"
     return Reply(msg)
+
+
+# ----------------------------------------------------------------------------
+# Lectura de la situación del tripulante (ventana de telemetría reciente)
+# ----------------------------------------------------------------------------
+REASONS = {
+    "hrv_low": "tu HRV bajó (menor recuperación)",
+    "sleep_low": "tu sueño ha sido poco eficiente",
+    "alerts_high": "han saltado varias alertas fisiológicas",
+}
+
+
+def physio_state(window: pd.DataFrame) -> dict:
+    """Interpreta los últimos registros (~3 h) de un tripulante. Nivel 0 estable, 1 leve, 2 alto."""
+    hrv = float(window["hrv_rmssd_ms"].mean())
+    sleep = float(window["sleep_efficiency_pct"].mean())
+    crit_share = float((window["alert_level"] == "CRÍTICO").mean())
+    points, reasons = 0, []
+    if hrv == hrv:
+        if hrv < 25:
+            points += 2; reasons.append("hrv_low")
+        elif hrv < 40:
+            points += 1; reasons.append("hrv_low")
+    if sleep == sleep:
+        if sleep < 70:
+            points += 2; reasons.append("sleep_low")
+        elif sleep < 80:
+            points += 1; reasons.append("sleep_low")
+    if crit_share >= 0.25:
+        points += 2; reasons.append("alerts_high")
+    elif crit_share >= 0.10:
+        points += 1; reasons.append("alerts_high")
+    level = 2 if points >= 4 else 1 if points >= 2 else 0
+    return {"hrv": hrv, "sleep": sleep, "crit_share": crit_share, "level": level, "reasons": reasons}
+
+
+# Consejos cortos para la tarjeta de Luma en el HUD
+HUD_TIPS = {
+    "stable": [
+        "Todo estable. Estírate un minuto y toma agua.",
+        "Buen momento para grabarle un mensaje a tu familia.",
+        "Mira la Tierra por la ventana un momento: ayuda a reconectar.",
+        "Respira hondo: pulsa B y te guío cuatro tiempos.",
+    ],
+    "hrv_low": ["Tu HRV bajó: hagamos 4 respiraciones lentas para recuperarte (tecla B)."],
+    "sleep_low": ["Tu sueño ha sido poco eficiente: baja la luz una hora antes de dormir."],
+    "alerts_high": ["Varias alertas seguidas: haz una pausa corta y avisa a tu equipo."],
+    "unsteady": ["Te noto inquieto en la cámara: relaja cuello y hombros un momento."],
+    "support": ["Si algo te pesa, platícalo hoy con alguien de la tripulación."],
+    "escalate": ["Hoy conviene hablar con el cirujano de vuelo o con el comandante."],
+}
+
+
+def hud_tips(level: int, reasons: list, unsteady: bool = False) -> list:
+    tips = []
+    for r in reasons:
+        tips += HUD_TIPS.get(r, [])
+    if unsteady:
+        tips += HUD_TIPS["unsteady"]
+    if level >= 1:
+        tips += HUD_TIPS["support"]
+    if level >= 2:
+        tips += HUD_TIPS["escalate"]
+    return tips or HUD_TIPS["stable"]
+
+
+# ----------------------------------------------------------------------------
+# Check-in de bienestar WHO-5 (índice de bienestar de la OMS, 5 preguntas)
+# ----------------------------------------------------------------------------
+WHO5_ITEMS = [
+    "Me he sentido alegre y de buen humor",
+    "Me he sentido tranquilo y relajado",
+    "Me he sentido activo y con energía",
+    "Me he despertado sintiéndome fresco y descansado",
+    "Mi vida diaria ha estado llena de cosas que me interesan",
+]
+WHO5_SCALE = ["En ningún momento", "Pocas veces", "Menos de la mitad del tiempo",
+              "Más de la mitad del tiempo", "Casi todo el tiempo", "Todo el tiempo"]
+WHO5_BANDS = {
+    0: "Bienestar dentro de lo esperado.",
+    1: "Bienestar reducido: conviene cuidarte y platicarlo con alguien.",
+    2: "Bienestar muy bajo: se recomienda apoyo de tu equipo.",
+}
+
+
+def who5_score(answers):
+    """answers: 5 enteros 0..5. Devuelve (crudo 0-25, porcentaje 0-100)."""
+    raw = int(sum(answers))
+    return raw, raw * 4
+
+
+def who5_level(raw):
+    """0 normal, 1 reducido (<13 crudo / <50 %), 2 muy bajo (<=7 crudo / <=28 %)."""
+    return 2 if raw <= 7 else 1 if raw < 13 else 0
+
+
+def combine(physio_level: int, who5_lvl):
+    """Une señales y check-in. Devuelve (nivel_general, conviene_escalar)."""
+    lvl = physio_level if who5_lvl is None else max(physio_level, who5_lvl)
+    escalate = who5_lvl == 2 or (who5_lvl == 1 and physio_level == 2)
+    return lvl, escalate
+
+
+# ----------------------------------------------------------------------------
+# Puente HUD de cámara -> consola web (archivo temporal, ~2 veces por segundo)
+# ----------------------------------------------------------------------------
+STATUS_PATH = Path(tempfile.gettempdir()) / "bioorbit_vision_status.json"
+
+
+def write_vision_status(**data) -> None:
+    try:
+        data["ts"] = time.time()
+        STATUS_PATH.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def read_vision_status(max_age: float = 5.0):
+    """Último estado del HUD de cámara, o None si no está corriendo."""
+    try:
+        data = json.loads(STATUS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if time.time() - data.get("ts", 0) <= max_age else None

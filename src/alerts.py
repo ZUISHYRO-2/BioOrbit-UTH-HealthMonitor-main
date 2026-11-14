@@ -17,7 +17,7 @@ import json
 import os
 import socket
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from math import hypot
 from pathlib import Path
 

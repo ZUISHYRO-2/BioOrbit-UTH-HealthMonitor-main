@@ -17,18 +17,44 @@ Durante misiones de espacio profundo hacia la Luna y Marte, las tripulaciones en
 
 ---
 
-## 🖥️ Consola de cabina (nueva)
+## 🤖 Luma, el compañero a bordo (nuevo)
 
-```bash
-streamlit run src/app.py
-```
+Luma es un pequeño robot flotante (diseño original del equipo) que acompaña a la tripulación en el
+aislamiento de una misión larga. Tiene 5 estados de ánimo que cambian solos según la situación:
 
-- **Monitor de salud futurista:** FC, HRV, SpO₂, temperatura, CO₂ y radiación en vivo (reproduce el CSV como flujo de telemetría).
-- **ORBI, compañero virtual:** conversa con cada tripulante (`ASTRO-01…04`), responde con empatía, ofrece respiración guiada y registro de ánimo, y detecta señales de crisis para pedir apoyo humano. Funciona sin internet; si defines `ANTHROPIC_API_KEY` conversa con un modelo de lenguaje (se envía el chat y un resumen biométrico: úsalo solo con consentimiento).
-- **Alerta por pérdida de signos vitales:** si faltan FC y SpO₂ varios segundos, la consola abre una cuenta regresiva de 10 s ("Estoy bien, cancelar aviso"). Si nadie la cancela, avisa a los tripulantes dentro del radio configurado por registro local, difusión UDP en la red (`python src/alert_listener.py` en los equipos receptores) y, opcionalmente, notificación push con `BIOORBIT_NTFY_TOPIC`.
-- En la barra lateral, **"Simular pérdida de signos vitales"** sirve para demostrar el flujo completo en el video.
+| Estado | Cuándo aparece |
+|---|---|
+| **Reposo** (verde) | Señales estables |
+| **Curioso** (azul) | Desgaste leve o cuando aún no encuentra tu rostro |
+| **Preocupado** (ámbar) | Desgaste alto, pérdida de signos vitales o frases de crisis |
+| **Calma** (ojos felices) | Durante la respiración guiada |
+| **Hablando** | Cuando te acaba de decir algo |
 
-> ⚠️ **Alcance:** prototipo educativo, no un dispositivo médico ni un servicio de salud mental. La proximidad entre tripulantes está configurada en `src/alerts.py` (en un sistema real vendría de balizas BLE/UWB) y los datos de telemetría son sintéticos.
+- **En el HUD de cámara** (`vision_monitor.py`): Luma vive en la tarjeta inferior izquierda, **te mira** (sus ojos siguen tu rostro),
+  su corazón late al ritmo de tu pulso y te da consejos según tu HRV, sueño, alertas y estabilidad de cabeza.
+- **En la consola web** (`app.py`): conversa con cada tripulante (`ASTRO-01…04`), respiración guiada, registro de ánimo
+  y **check-in WHO-5** (índice de bienestar de la OMS). Si el check-in sale muy bajo, o bajo con desgaste fisiológico alto,
+  sugiere avisar al cirujano de vuelo y activa "Pedir apoyo humano ahora".
+- Funciona **sin internet** con reglas. Si defines `ANTHROPIC_API_KEY`, conversa con un modelo de lenguaje (se envía el chat
+  y un resumen biométrico: úsalo solo con consentimiento).
+- Es un acompañante: **no diagnostica** ni sustituye a la tripulación ni al equipo médico.
+
+## 🎯 Rostro fijado en el HUD
+
+El HUD detecta tu cara con OpenCV (dos modelos Haar, imagen ecualizada) y la **deja enclavada**: una retícula se cierra
+sobre tu rostro, con anillo giratorio y barrido. Una vez fijada, sigue a esa misma cara e ignora detecciones falsas de un
+instante; solo cambia de cara si la otra persiste ~0.5 s. Sobre esa región mide el pulso por rPPG.
+
+## 🚨 Alerta a tripulantes cercanos
+
+Si faltan frecuencia cardíaca y SpO₂ varias lecturas seguidas, aparece una cuenta regresiva de 10 s ("Estoy bien").
+Si nadie la cancela, avisa a los tripulantes dentro del radio configurado por registro local, difusión UDP en la red
+(`python src/alert_listener.py` en los equipos receptores) y, opcionalmente, push con `BIOORBIT_NTFY_TOPIC`.
+
+> ⚠️ **Alcance:** prototipo educativo, no un dispositivo médico ni un servicio de salud mental. La proximidad entre
+> tripulantes está configurada en `src/alerts.py` (en un sistema real vendría de balizas BLE/UWB) y la telemetría es
+> **simulada**: `data/demo_stress_arc.csv` (generado con `src/generate_demo_data.py`, ASTRO-02 se desgasta poco a poco)
+> y `data/sample_astronaut_telemetry.csv`. No son datos reales de la NASA.
 
 ---
 
@@ -54,19 +80,24 @@ El proyecto sigue las directrices técnicas de ingeniería y digitalización de 
 
 ```text
 BioOrbit-UTH-HealthMonitor/
+├── .streamlit/config.toml               # Tema oscuro de la consola
 ├── data/
-│   └── sample_astronaut_telemetry.csv   # Dataset de bioseñales calibrado con rangos NASA
+│   ├── demo_stress_arc.csv              # Escenario simulado para el demo (ASTRO-02 se desgasta)
+│   └── sample_astronaut_telemetry.csv   # Telemetría simulada (4 tripulantes)
 ├── src/
-│   ├── app.py                           # Consola de cabina (Streamlit)
-│   ├── alerts.py                        # Detección de pérdida de signos vitales y avisos
+│   ├── app.py                           # Consola de cabina (Streamlit) + Luma + WHO-5
+│   ├── vision_monitor.py                # HUD de cámara: rostro fijado, pulso rPPG, Luma, alertas
+│   ├── luma.py                          # Luma: dibujo animado (OpenCV y HTML) y estados de ánimo
+│   ├── companion.py                     # Cerebro de Luma: chat, consejos, WHO-5, lectura de señales
+│   ├── alerts.py                        # Pérdida de signos vitales y avisos a cercanos
 │   ├── alert_listener.py                # Receptor de alertas para equipos cercanos
-│   ├── companion.py                     # ORBI, compañero virtual
-│   ├── data_pipeline.py                 # Pipeline de ingesta, cálculo de HRV y alertas
-│   └── vision_monitor.py                # Módulo OpenCV de análisis de fatiga y postura
+│   ├── data_pipeline.py                 # Pipeline de ingesta, HRV, alertas y dosis de radiación
+│   └── generate_demo_data.py            # Genera demo_stress_arc.csv
 ├── docs/
-│   └── pitch_script_30s.md              # Guion oficial de pitch de 30 segundos en inglés
-├── requirements.txt                     # Dependencias de Python
-└── README.md                            # Documentación técnica del proyecto
+│   ├── pitch_script_30s.md              # Guion de pitch de 30 segundos en inglés
+│   └── vista_previa_hud.png             # Captura del HUD
+├── requirements.txt
+└── README.md
 ```
 
 ---
@@ -87,17 +118,29 @@ pip install -r requirements.txt
 python src/data_pipeline.py data/sample_astronaut_telemetry.csv
 ```
 
-### 3. Ejecutar el HUD de cámara (rediseñado)
+### 3. HUD de cámara con Luma
 ```bash
-python src/vision_monitor.py            # o: python src/vision_monitor.py 0 ASTRO-02
+python src/vision_monitor.py                      # cámara automática, demo_stress_arc.csv, ASTRO-02
+python src/vision_monitor.py 0 ASTRO-01 --csv=data/sample_astronaut_telemetry.csv
 ```
-Teclas: **S** simular pérdida de signos vitales · **C** "estoy bien" · **B** respiración guiada · **Q** salir.
-Pulso por rPPG experimental (real, con la cámara); SpO₂, temperatura, CO₂ y radiación son telemetría simulada del CSV y el HUD lo indica.
+| Tecla | Acción |
+|---|---|
+| **S** | Simular pérdida de signos vitales |
+| **C** | "Estoy bien" (cancela el aviso) |
+| **B** | Respiración guiada (Luma pasa a calma) |
+| **P** | Pausar / reanudar la telemetría |
+| **A / D** | Retroceder / avanzar en la misión |
+| **N** | Siguiente astronauta |
+| **Q / Esc** | Salir |
 
-### 4. Consola web con ORBI
+Pulso por rPPG experimental (real, con la cámara; necesita buena luz y quedarte quieto). SpO₂, temperatura, CO₂,
+radiación, HRV y sueño son telemetría simulada del CSV y el HUD lo indica.
+
+### 4. Consola web con Luma
 ```bash
 streamlit run src/app.py
 ```
+Se pueden correr los dos a la vez: la consola muestra en la barra lateral si el HUD está conectado y el pulso que mide la cámara.
 
 ---
 

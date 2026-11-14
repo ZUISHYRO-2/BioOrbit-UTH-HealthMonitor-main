@@ -4,24 +4,28 @@ BioOrbit-UTH · Consola de cabina.
     streamlit run src/app.py
 
 - Monitor de salud con telemetría en vivo (reproduce el CSV como si fuera un flujo real).
-- ORBI: compañero virtual para toda la tripulación.
+- Luma: robot compañero para toda la tripulación (chat, respiración, ánimo y check-in WHO-5).
 - Alerta a tripulantes cercanos cuando se pierden los signos vitales (con cuenta de confirmación).
 """
 
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
 
 import alerts
 import companion
 from data_pipeline import calculate_health_scores, load_telemetry
+from luma import luma_html, pick_mood
 
-DATA = Path(__file__).resolve().parent.parent / "data" / "sample_astronaut_telemetry.csv"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+WINDOW = 12  # registros recientes que analiza Luma
 VITAL = ["heart_rate_bpm", "hrv_rmssd_ms", "spo2_pct"]
 LEVEL_COLOR = ["#3ef0b0", "#ffc857", "#ff4d6d"]  # normal, precaución, crítico
 
@@ -61,10 +65,6 @@ section[data-testid="stSidebar"]{background:#080d2acc;border-right:1px solid #38
 .warn{background:#3a2a05;border:1px solid #ffc857}
 .sos{background:linear-gradient(90deg,#5c0a1e,#a3123a);border:1px solid #ff4d6d;animation:glow 1.2s infinite alternate}
 @keyframes glow{to{box-shadow:0 0 36px #ff4d6d}}
-.orbi{width:84px;height:84px;border-radius:50%;margin:4px auto 14px;
-  background:radial-gradient(circle at 35% 30%,#fff,#38e1ff 30%,#8b7cff 65%,#1a1650);
-  box-shadow:0 0 40px #38e1ff66,0 0 90px #8b7cff44;animation:float 5s ease-in-out infinite}
-@keyframes float{50%{transform:translateY(-6px) scale(1.04)}}
 .breath{width:110px;height:110px;border-radius:50%;margin:18px auto 6px;border:2px solid var(--cy);
   box-shadow:0 0 30px #38e1ff66;animation:box 16s infinite}
 @keyframes box{0%{transform:scale(.55)}25%{transform:scale(1)}50%{transform:scale(1)}75%{transform:scale(.55)}100%{transform:scale(.55)}}
@@ -80,14 +80,33 @@ button[kind="primary"]{background:linear-gradient(90deg,#38e1ff,#8b7cff)!importa
 )
 
 
+def show_html(html, height):
+    """Lienzo HTML propio (Luma). st.iframe en Streamlit nuevo; components.html en versiones viejas."""
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:
+        components.html(html, height=height)
+
+
 @st.cache_data
-def load():
-    df = calculate_health_scores(load_telemetry(str(DATA)))
+def load(name):
+    df = calculate_health_scores(load_telemetry(str(DATA_DIR / name))).sort_values("timestamp")
     return {c: g.reset_index(drop=True) for c, g in df.groupby("crew_id")}
 
 
-data = load()
+CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv"))
 ss = st.session_state
+with st.sidebar:
+    st.markdown('<div class="brand">BioOrbit</div><div class="sub">UTH · NASA Space Apps 2026</div>',
+                unsafe_allow_html=True)
+    dataset = st.selectbox("Telemetría (simulada)", CSVS,
+                           index=CSVS.index("demo_stress_arc.csv") if "demo_stress_arc.csv" in CSVS else 0,
+                           help="demo_stress_arc.csv: ASTRO-02 se desgasta poco a poco (ideal para el video).")
+data = load(dataset)
+if ss.get("dataset") != dataset:          # al cambiar de datos, se reinicia la reproducción
+    for k in ("idx", "flat", "em"):
+        ss.pop(k, None)
+    ss.dataset = dataset
 ss.setdefault("idx", {c: 0 for c in data})        # posición (sin recortar) en la reproducción
 ss.setdefault("flat", {c: None for c in data})    # índice donde se simuló la pérdida de señal
 ss.setdefault("em", {c: alerts.Emergency() for c in data})
@@ -95,11 +114,11 @@ ss.setdefault("chat", {})
 ss.setdefault("crisis", {})
 ss.setdefault("mood", [])
 ss.setdefault("log", [])
+ss.setdefault("checkins", {})
+ss.setdefault("talk_at", 0.0)
 
 # ---------------------------------------------------------------- barra lateral
 with st.sidebar:
-    st.markdown('<div class="brand">BioOrbit</div><div class="sub">UTH · NASA Space Apps 2026</div>',
-                unsafe_allow_html=True)
     crew = st.selectbox("Astronauta monitoreado", list(data))
     playing = st.toggle("Telemetría en vivo", True)
     radius = st.slider("Radio de aviso (m)", 5, 60, 20)
@@ -109,6 +128,15 @@ with st.sidebar:
         ss.flat[crew] = ss.idx[crew]
     if st.button("Restablecer sensores", width="stretch"):
         ss.flat[crew] = None
+    st.divider()
+    cam = companion.read_vision_status()
+    if cam:
+        bpm_txt = f"{cam['bpm']:.0f} bpm" if cam.get("bpm") else "midiendo…"
+        st.caption(f"📷 HUD de cámara conectado · {cam['crew']} · "
+                   f"{'rostro fijado' if cam.get('face_locked') else 'sin rostro'} · pulso {bpm_txt}")
+    else:
+        st.caption("📷 HUD de cámara apagado. Ábrelo con `python src/vision_monitor.py`.")
+    st.caption("Prototipo educativo con telemetría simulada. No es un dispositivo médico.")
 
 RULES = {
     "hr": lambda v: 0 if 60 <= v <= 90 else (1 if 50 <= v <= 105 else 2),
@@ -130,9 +158,9 @@ def kpi(label, key, v, unit, fmt):
 
 
 def style(fig, h=270):
-    fig.update_layout(height=h, margin=dict(l=6, r=6, t=34, b=6), paper_bgcolor="rgba(0,0,0,0)",
+    fig.update_layout(height=h, margin=dict(l=6, r=6, t=64, b=6), paper_bgcolor="rgba(0,0,0,0)",
                       plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#9fb7d9", family="Sora"),
-                      legend=dict(orientation="h", y=1.18, x=0))
+                      legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0))
     fig.update_xaxes(gridcolor="#38e1ff14", showline=False)
     fig.update_yaxes(gridcolor="#38e1ff14", showline=False)
     return fig
@@ -144,7 +172,7 @@ def dual(w, a, b, na, nb, ca, cb, title):
                            line=dict(color=ca, width=3, shape="spline")), secondary_y=False)
     f.add_trace(go.Scatter(x=w.timestamp, y=w[b], name=nb, connectgaps=False,
                            line=dict(color=cb, width=2, dash="dot")), secondary_y=True)
-    f.update_layout(title=dict(text=title, font=dict(size=14, family="Chakra Petch"), x=0.01))
+    f.update_layout(title=dict(text=title, font=dict(size=14, family="Chakra Petch"), x=0.01, y=0.97, yanchor="top"))
     return style(f)
 
 
@@ -228,34 +256,53 @@ def monitor(crew, radius, playing):
                 f'<div class="sub" style="margin:10px 0 0">{chans}</div></div>', unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------- compañero ORBI
+# ---------------------------------------------------------------- compañero Luma
 def chat_tab():
-    who = st.selectbox("¿Quién habla con ORBI?", list(alerts.ROSTER), key="who",
+    who = st.selectbox("¿Quién habla con Luma?", list(alerts.ROSTER), key="who",
                        format_func=lambda c: f"{c} · {alerts.ROSTER[c]['role']}")
     hist = ss.chat.setdefault(who, [])
-    row = data[who].iloc[ss.idx[who] % len(data[who])] if who in data else None
+    row, physio = None, {"level": 0, "reasons": []}
+    if who in data:
+        i = ss.idx[who] % len(data[who])
+        row = data[who].iloc[i]
+        physio = companion.physio_state(data[who].iloc[max(0, i - WINDOW + 1): i + 1])
+    last = ss.checkins.get(who)
+    who_lvl = companion.who5_level(last["raw"]) if last else None
+    level, escalate = companion.combine(physio["level"], who_lvl)
     if not hist:
         hist.append(("assistant", companion.greeting(who, row)))
+
+    if escalate:
+        st.markdown('<div class="banner warn"><b>Conviene avisar al cirujano de vuelo o al comandante.</b> '
+                    'Por tu check-in y tus señales, lo mejor es que alguien de tu equipo te acompañe. '
+                    'No es un diagnóstico: es una sugerencia de apoyo.</div>', unsafe_allow_html=True)
 
     left, right = st.columns([3, 2], gap="large")
     with left:
         for role, txt in hist:
             with st.chat_message(role, avatar="🛰️" if role == "assistant" else "🧑‍🚀"):
                 st.markdown(txt)
-        msg = st.chat_input("Cuéntale a ORBI cómo te sientes", key="chat_in")
+        msg = st.chat_input("Cuéntale a Luma cómo te sientes", key="chat_in")
         if msg:
             hist.append(("user", msg))
             r = companion.reply(msg, who, row, hist)
             hist.append(("assistant", r.text))
             if r.crisis:
                 ss.crisis[who] = True
+            ss.talk_at = time.time()
             st.rerun()
     with right:
-        st.markdown('<div class="panel"><div class="orbi"></div>'
-                    '<div class="ttl" style="text-align:center;font-size:1.1rem">Respiración guiada</div>'
-                    '<div class="breath"></div>'
-                    '<div class="sub" style="text-align:center">Inhala, sostén, exhala, sostén. Cuatro segundos cada fase.</div></div>',
+        talk_s = max(0.0, 4.0 - (time.time() - ss.talk_at))
+        mood = pick_mood(level, emergency=bool(ss.crisis.get(who)), talking=talk_s > 0)
+        bpm = None if row is None else row["heart_rate_bpm"]
+        estado = {0: "estable", 1: "desgaste leve", 2: "desgaste alto"}[level]
+        st.markdown(f'<div class="ttl" style="text-align:center;font-size:1.1rem">Luma · {mood}</div>'
+                    f'<div class="sub" style="text-align:center;margin:0">{who} · {estado}</div>',
                     unsafe_allow_html=True)
+        show_html(luma_html(mood, bpm if bpm == bpm else 70, talk_s, height=260), 266)
+        with st.expander("Respiración guiada"):
+            st.markdown('<div class="breath"></div><div class="sub" style="text-align:center">'
+                        'Inhala, sostén, exhala, sostén. Cuatro segundos cada fase.</div>', unsafe_allow_html=True)
         mood = st.select_slider("¿Cómo te sientes hoy?", options=[1, 2, 3, 4, 5], value=3,
                                 format_func=lambda v: ["😞", "😕", "😐", "🙂", "😄"][v - 1])
         if st.button("Guardar mi ánimo", width="stretch"):
@@ -266,15 +313,42 @@ def chat_tab():
         mine = [f"{t}: {['😞', '😕', '😐', '🙂', '😄'][m - 1]}" for t, w_, m in ss.mood if w_ == who][-5:]
         if mine:
             st.caption("Tus últimos registros — " + " · ".join(mine))
-        if ss.crisis.get(who):
+        if ss.crisis.get(who) or escalate:
             if st.button("Pedir apoyo humano ahora", type="primary", width="stretch"):
                 res = alerts.broadcast("SUPPORT", who, radius)
                 ss.log.insert(0, res)
                 names = ", ".join(c for c, _, _ in res["notified"]) or "nadie dentro del radio"
                 st.success(f"Aviso enviado. Avisados: {names}.")
 
+    who5_panel(who, last)
 
-tab1, tab2 = st.tabs(["Monitor de salud", "ORBI, tu compañero"])
+
+def who5_panel(who, last):
+    """Check-in WHO-5: 5 preguntas de bienestar de la OMS, se combina con las señales."""
+    st.divider()
+    st.markdown('<div class="ttl" style="font-size:1.2rem">Check-in de bienestar (WHO-5)</div>',
+                unsafe_allow_html=True)
+    if last:
+        st.markdown(f'<div class="sub">Último check-in de {who}: <b>{last["pct"]} %</b> · '
+                    f'{companion.WHO5_BANDS[companion.who5_level(last["raw"])]} ({last["when"]})</div>',
+                    unsafe_allow_html=True)
+    with st.expander("Hacer check-in", expanded=False):
+        st.markdown("Piensa en las **últimas dos semanas**. ¿Con qué frecuencia te has sentido así?")
+        with st.form(f"who5_{who}"):
+            answers = [st.radio(f"{k + 1}. {item}", options=list(range(6)), index=None, horizontal=True,
+                                format_func=lambda v: companion.WHO5_SCALE[v], key=f"who5_{who}_{k}")
+                       for k, item in enumerate(companion.WHO5_ITEMS)]
+            sent = st.form_submit_button("Guardar check-in")
+        if sent:
+            if any(a is None for a in answers):
+                st.warning("Responde las 5 preguntas.")
+            else:
+                raw, pct = companion.who5_score(answers)
+                ss.checkins[who] = {"raw": raw, "pct": pct, "when": datetime.now().strftime("%H:%M")}
+                st.rerun()
+
+
+tab1, tab2 = st.tabs(["Monitor de salud", "Luma, tu compañero"])
 with tab1:
     st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius, playing)
 with tab2:
