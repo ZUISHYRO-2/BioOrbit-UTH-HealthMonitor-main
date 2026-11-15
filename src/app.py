@@ -34,6 +34,7 @@ from data_pipeline import calculate_health_scores, load_telemetry
 from luma import luma_html, pick_mood
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+REFERENCE_DATASET_PATH = DATA_DIR / "osdr_catalog.csv"
 WINDOW = 12  # registros recientes que analiza Luma
 VITAL = ["heart_rate_bpm", "hrv_rmssd_ms", "spo2_pct"]
 NO_DATA_COLS = ["heart_rate_bpm", "hrv_rmssd_ms", "spo2_pct", "body_temp_c", "cabin_co2_ppm",
@@ -840,7 +841,8 @@ def nasa_data_tab():
         "Descarga un archivo **CSV o TSV** de acceso abierto desde "
         "[NASA OSDR](https://osdr.nasa.gov/bio/repo/data/studies/) o "
         "[NASA Life Sciences Portal](https://nlsp.nasa.gov/explore) y cárgalo aquí. "
-        "No se admiten archivos ZIP."
+        "No se admiten archivos ZIP. Si no seleccionas otro archivo, se muestra el catálogo guardado en "
+        "`data/osdr_catalog.csv`."
     )
     uploaded = st.file_uploader("Dataset de referencia", type=["csv", "tsv", "txt"], key="nasa_dataset_upload")
     if uploaded is not None:
@@ -852,13 +854,25 @@ def nasa_data_tab():
         except ValueError as exc:
             st.error(str(exc))
         else:
-            st.caption(f"{uploaded.name} · {len(dataset):,} filas · {len(dataset.columns)} columnas")
-            st.dataframe(dataset.head(100), hide_index=True, width="stretch")
-            numeric_columns = dataset.select_dtypes(include=np.number).columns.tolist()
-            if numeric_columns:
-                with st.expander("Resumen estadístico de columnas numéricas"):
-                    st.dataframe(dataset[numeric_columns].describe().T, width="stretch")
-            st.info("Este dataset se muestra como referencia y no se mezcla con la telemetría ni altera las alertas.")
+            show_reference_dataset(dataset, uploaded.name)
+    elif REFERENCE_DATASET_PATH.is_file():
+        try:
+            with REFERENCE_DATASET_PATH.open("rb") as reference_file:
+                dataset = nasa_data.read_reference_dataset(reference_file)
+        except (OSError, ValueError) as exc:
+            st.error(f"No se pudo cargar data/osdr_catalog.csv: {exc}")
+        else:
+            show_reference_dataset(dataset, REFERENCE_DATASET_PATH.name)
+
+
+def show_reference_dataset(dataset: pd.DataFrame, name: str) -> None:
+    st.caption(f"{name} · {len(dataset):,} filas · {len(dataset.columns)} columnas")
+    st.dataframe(dataset.head(100), hide_index=True, width="stretch")
+    numeric_columns = dataset.select_dtypes(include=np.number).columns.tolist()
+    if numeric_columns:
+        with st.expander("Resumen estadístico de columnas numéricas"):
+            st.dataframe(dataset[numeric_columns].describe().T, width="stretch")
+    st.info("Este dataset se muestra como referencia y no se mezcla con la telemetría ni altera las alertas.")
 
 
 tick()
