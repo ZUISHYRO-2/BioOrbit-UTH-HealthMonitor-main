@@ -14,6 +14,7 @@ import time
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -115,9 +116,9 @@ def show_html(html, height):
 
 
 @st.cache_data
-def load(name):
+def load(name: str) -> dict[str, pd.DataFrame]:
     df = calculate_health_scores(load_telemetry(str(DATA_DIR / name))).sort_values("timestamp")
-    return {c: g.reset_index(drop=True) for c, g in df.groupby("crew_id")}
+    return {str(c): g.reset_index(drop=True) for c, g in df.groupby("crew_id")}
 
 
 @st.cache_data(ttl=1800)
@@ -128,9 +129,9 @@ def cached_nasa_sep_events(start_date, end_date):
 CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv"))
 
 
-def all_crew():
+def all_crew() -> list[str]:
     """Toda la plantilla (ROSTER) más lo que traiga el CSV, sin repetir."""
-    return list(dict.fromkeys(list(alerts.ROSTER) + list(data)))
+    return list(dict.fromkeys([str(c) for c in alerts.ROSTER] + list(data)))
 
 
 ss = st.session_state
@@ -323,12 +324,12 @@ def share_alert(rec):
     rec.setdefault("channels", []).append(("Servidor de tripulación", "enviado"))
 
 
-def last_alert(crew):
+def last_alert(crew: str) -> dict[str, Any] | None:
     """Último aviso enviado POR este astronauta (el registro es de toda la tripulación)."""
     return next((a for a in ss.log if a["crew"] == crew), None)
 
 
-def monitor(crew, radius, playing):
+def monitor(crew: str, radius: int):
     tick()
     df = data[crew]
     cur = ss.cur[crew]
@@ -356,8 +357,7 @@ def monitor(crew, radius, playing):
         if st.button("Estoy bien, cancelar aviso", key="ack"):
             alerts.acknowledge(em, now)
             st.rerun(scope="fragment")
-    elif em.phase == "SENT" and last_alert(crew):
-        last = last_alert(crew)
+    elif em.phase == "SENT" and (last := last_alert(crew)) is not None:
         who = ", ".join(f"{c} ({r}, {d:.0f} m)" for c, r, d in last["notified"]) or "nadie dentro del radio"
         st.markdown(f'<div class="banner sos"><b>Alerta enviada a las {last["when"]}.</b> '
                     f'Avisados: {who}.</div>', unsafe_allow_html=True)
@@ -398,8 +398,9 @@ def monitor(crew, radius, playing):
     rows = "".join(f"<tr><td>{c}</td><td>{inf['role']}</td><td>{inf['module']}</td><td>{d:.0f} m</td></tr>"
                    for c, inf, d in near) or '<tr><td colspan="4">Nadie dentro del radio de aviso.</td></tr>'
     chans = ""
-    if last_alert(crew):
-        chans = "<br>Último aviso: " + " · ".join(f"{n_}: {s}" for n_, s in last_alert(crew)["channels"])
+    last = last_alert(crew)
+    if last is not None:
+        chans = "<br>Último aviso: " + " · ".join(f"{n_}: {s}" for n_, s in last["channels"])
     st.markdown(f'<div class="panel"><div class="ttl" style="font-size:1.05rem;margin-bottom:8px">'
                 f'Tripulantes que recibirían el aviso</div>'
                 f'<table class="near"><tr><th>Persona</th><th>Rol</th><th>Módulo</th><th>Distancia</th></tr>{rows}</table>'
@@ -444,7 +445,9 @@ def chat_tab():
     with right:
         talk_s = max(0.0, 4.0 - (time.time() - ss.talk_at))
         mood = pick_mood(level, emergency=bool(ss.crisis.get(who)), talking=talk_s > 0)
-        bpm = None if row is None else row["heart_rate_bpm"]
+        bpm = 70
+        if row is not None and pd.notna(row["heart_rate_bpm"]):
+            bpm = int(row["heart_rate_bpm"])
         estado = {0: "estable", 1: "desgaste leve", 2: "desgaste alto"}[level]
         st.markdown(f'<div class="ttl" style="text-align:center;font-size:1.1rem">Luma · {mood}</div>'
                     f'<div class="sub" style="text-align:center;margin:0">{who} · {estado}</div>',
@@ -683,8 +686,7 @@ def control_center():
             if st.button(f"{c}: estoy bien, cancelar aviso", key=f"cc_ack_{c}"):
                 alerts.acknowledge(em, now)
                 st.rerun(scope="fragment")
-        elif em.phase == "SENT" and last_alert(c):
-            la = last_alert(c)
+        elif em.phase == "SENT" and (la := last_alert(c)) is not None:
             who = ", ".join(f"{x} ({r}, {d:.0f} m)" for x, r, d in la["notified"]) or "nadie dentro del radio"
             st.markdown(f'<div class="banner sos"><b>{escape(c)}: alerta enviada a las {la["when"]}.</b> '
                         f'Avisados: {escape(who)}.</div>', unsafe_allow_html=True)
@@ -868,7 +870,7 @@ with tab0:
 with tabc:
     crew_chat()
 with tab1:
-    st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius, playing)
+    st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius)
 with tab2:
     chat_tab()
 with tab_nasa:
