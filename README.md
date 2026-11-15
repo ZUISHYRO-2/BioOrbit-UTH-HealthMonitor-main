@@ -45,6 +45,14 @@ El HUD detecta tu cara con OpenCV (dos modelos Haar, imagen ecualizada) y la **d
 sobre tu rostro, con anillo giratorio y barrido. Una vez fijada, sigue a esa misma cara e ignora detecciones falsas de un
 instante; solo cambia de cara si la otra persiste ~0.5 s. Sobre esa región mide el pulso por rPPG.
 
+## 🛰️ Centro de control multi-astronauta (nuevo)
+
+La primera pestaña de la consola (`streamlit run src/app.py`) muestra a **toda la tripulación a la vez**: una tarjeta por
+astronauta (estado, FC, SpO₂, HRV, temperatura, ánimo de Luma, dispositivos conectados), los más urgentes primero, gráficas
+comparativas, tabla de dispositivos con su estado (en línea / retrasado / sin señal) e historial de avisos. Las alertas por
+pérdida de signos vitales ahora se vigilan para **todos** los astronautas, no solo el que estás monitoreando.
+Los teléfonos se enlazan con `python crew_server/server.py` y otras laptops con `python src/fleet_server.py`; detalles en [`docs/fleet_api.md`](docs/fleet_api.md).
+
 ## ⌚ Reloj inteligente por Bluetooth (nuevo)
 
 La frecuencia cardíaca puede venir de un **reloj real** en lugar del CSV simulado:

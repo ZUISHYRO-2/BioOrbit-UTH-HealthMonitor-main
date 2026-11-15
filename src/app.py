@@ -6,10 +6,12 @@ BioOrbit-UTH · Consola de cabina.
 - Monitor de salud con telemetría en vivo (reproduce el CSV como si fuera un flujo real).
 - Luma: robot compañero para toda la tripulación (chat, respiración, ánimo y check-in WHO-5).
 - Alerta a tripulantes cercanos cuando se pierden los signos vitales (con cuenta de confirmación).
+- Centro de control: toda la tripulación y todos los dispositivos (reloj, cámara, móvil) en una sola vista.
 """
 
 import time
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -22,12 +24,16 @@ from plotly.subplots import make_subplots
 import alerts
 import ble_watch
 import companion
+import crew_link
+import fleet
 from data_pipeline import calculate_health_scores, load_telemetry
 from luma import luma_html, pick_mood
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 WINDOW = 12  # registros recientes que analiza Luma
 VITAL = ["heart_rate_bpm", "hrv_rmssd_ms", "spo2_pct"]
+NO_DATA_COLS = ["heart_rate_bpm", "hrv_rmssd_ms", "spo2_pct", "body_temp_c", "cabin_co2_ppm",
+                "radiation_rate_usv_h", "sleep_efficiency_pct"]
 LEVEL_COLOR = ["#3ef0b0", "#ffc857", "#ff4d6d"]  # normal, precaución, crítico
 
 st.set_page_config(page_title="BioOrbit-UTH", page_icon="🛰️", layout="wide")
@@ -74,6 +80,16 @@ table.near td,table.near th{padding:6px 8px;border-bottom:1px solid #38e1ff1f;te
 table.near th{color:var(--mut);font-weight:400}
 div[data-testid="stChatMessage"]{background:#0e143299;border:1px solid #38e1ff22;border-radius:16px}
 button[kind="primary"]{background:linear-gradient(90deg,#38e1ff,#8b7cff)!important;color:#05071a!important;border:0!important}
+.fcard{background:linear-gradient(160deg,#101a4088,#0a0f2b99);border:1px solid #38e1ff2e;border-left:4px solid var(--c);
+  border-radius:16px;padding:14px 16px;margin-bottom:6px}
+.fcard.alarm{animation:glow 1.2s infinite alternate;border-color:#ff4d6d}
+.fhead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.fgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 8px}
+.fgrid .lb{font-size:.7rem;color:var(--mut)}
+.fgrid .vl{font-family:'Chakra Petch';font-size:1.25rem;font-weight:600;color:#fff;border-bottom:2px solid var(--c);display:inline-block}
+.fgrid .vl span{font-size:.65rem;color:var(--mut);margin-left:3px;font-weight:400}
+.badge{display:inline-block;font-size:.74rem;padding:2px 9px;border-radius:999px;border:1px solid var(--c);color:var(--c);margin:2px 4px 0 0}
+.fmeta{color:var(--mut);font-size:.78rem;margin-top:6px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 """,
@@ -96,6 +112,13 @@ def load(name):
 
 
 CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv"))
+
+
+def all_crew():
+    """Toda la plantilla (ROSTER) más lo que traiga el CSV, sin repetir."""
+    return list(dict.fromkeys(list(alerts.ROSTER) + list(data)))
+
+
 ss = st.session_state
 with st.sidebar:
     st.markdown('<div class="brand">BioOrbit</div><div class="sub">UTH · NASA Space Apps 2026</div>',
@@ -105,7 +128,7 @@ with st.sidebar:
                            help="demo_stress_arc.csv: ASTRO-02 se desgasta poco a poco (ideal para el video).")
 data = load(dataset)
 if ss.get("dataset") != dataset:          # al cambiar de datos, se reinicia la reproducción
-    for k in ("idx", "flat", "em"):
+    for k in ("idx", "flat", "em", "cur"):
         ss.pop(k, None)
     ss.dataset = dataset
 ss.setdefault("idx", {c: 0 for c in data})        # posición (sin recortar) en la reproducción
@@ -117,6 +140,12 @@ ss.setdefault("mood", [])
 ss.setdefault("log", [])
 ss.setdefault("checkins", {})
 ss.setdefault("talk_at", 0.0)
+ss.setdefault("cur", {})          # último estado calculado por astronauta
+ss.setdefault("last_tick", 0.0)
+ss.setdefault("playing", True)
+ss.setdefault("radius", 20)
+ss.setdefault("devs", [])
+crew_link.get_link().start()      # enlace en segundo plano con el servidor de tripulación (teléfonos)
 
 # ---------------------------------------------------------------- reloj Bluetooth
 @st.fragment(run_every=2.0)
@@ -160,14 +189,16 @@ def watch_sidebar():
     if c2.button("Desconectar", width="stretch"):
         mgr.disconnect()
     watch_status()
-    st.caption("El reloj se asigna al astronauta monitoreado.")
+    st.selectbox("Reloj asignado a", all_crew(), key="watch_crew",
+                 help="El reloj Bluetooth reemplaza la frecuencia cardíaca simulada de este astronauta.")
 
 
 # ---------------------------------------------------------------- barra lateral
 with st.sidebar:
-    crew = st.selectbox("Astronauta monitoreado", list(data))
+    crew = st.selectbox("Astronauta monitoreado", list(data), key="crew_pick")
     playing = st.toggle("Telemetría en vivo", True)
     radius = st.slider("Radio de aviso (m)", 5, 60, 20)
+    ss.playing, ss.radius = playing, radius
     st.divider()
     st.caption("Demostración")
     if st.button("Simular pérdida de signos vitales", width="stretch", type="primary"):
@@ -225,23 +256,61 @@ def dual(w, a, b, na, nb, ca, cb, title):
 
 
 # ---------------------------------------------------------------- monitor en vivo
-def monitor(crew, radius, playing):
-    df = data[crew]
-    n = ss.idx[crew]
-    i = n % len(df)
-    watch, watch_data = ble_watch.watch_state()
-    row = ble_watch.apply_watch(df.iloc[i], watch, watch_data)
-    start = ss.flat[crew]
-    if start is not None:
-        row[VITAL] = np.nan
+def tick(force=False):
+    """Un latido de la consola: calcula el estado de TODA la tripulación una vez por segundo.
 
-    status = alerts.vitals_status(row)
+    Lo llaman a la vez el monitor y el centro de control; el seguro de tiempo evita contar doble.
+    """
+    now = time.time()
+    if ss.cur and not force and now - ss.last_tick < 0.9:
+        return
+    ss.last_tick = now
+    devs = fleet.snapshot(ss.get("watch_crew"), now)
+    for c in all_crew():
+        df = data.get(c)
+        n = ss.idx.get(c, 0)
+        if df is not None:
+            i = n % len(df)
+            row = df.iloc[i].copy()
+        else:                                  # sin telemetría simulada: solo cuentan los dispositivos reales
+            i, row = 0, pd.Series({k: np.nan for k in NO_DATA_COLS})
+        wstate, wdata = "off", None
+        if c == ss.get("watch_crew"):
+            wstate, wdata = ble_watch.watch_state()
+            row = ble_watch.apply_watch(row, wstate, wdata)
+        fstate, fdata = fleet.vitals_state(c, devs)   # teléfonos u otros dispositivos que reportan
+        if fstate != "off":
+            row = ble_watch.apply_watch(row, fstate, fdata)
+            wstate, wdata = fstate, fdata
+        if ss.flat.get(c) is not None:
+            row[VITAL] = np.nan
+        em = ss.em.setdefault(c, alerts.Emergency())
+        if df is None and wstate == "off":
+            status = "NO_DATA"                 # nada que vigilar: no dispara alertas
+        else:
+            status = alerts.vitals_status(row)
+        if alerts.step(em, status, now) == "DUE":
+            ss.log.insert(0, alerts.broadcast("NO_VITALS", c, ss.radius))
+            em.phase = "SENT"
+        ss.cur[c] = dict(n=n, i=i, row=row, status=status, watch=wstate, watch_data=wdata)
+        if ss.playing and df is not None:
+            ss.idx[c] = n + 1
+    ss.devs = devs
+
+
+def last_alert(crew):
+    """Último aviso enviado POR este astronauta (el registro es de toda la tripulación)."""
+    return next((a for a in ss.log if a["crew"] == crew), None)
+
+
+def monitor(crew, radius, playing):
+    tick()
+    df = data[crew]
+    cur = ss.cur[crew]
+    n, i, row, status = cur["n"], cur["i"], cur["row"], cur["status"]
+    watch, watch_data = cur["watch"], cur["watch_data"]
+    start = ss.flat[crew]
     em, now = ss.em[crew], time.time()
-    if alerts.step(em, status, now) == "DUE":
-        ss.log.insert(0, alerts.broadcast("NO_VITALS", crew, radius))
-        em.phase = "SENT"
-    if playing:
-        ss.idx[crew] = n + 1
 
     info = alerts.ROSTER[crew]
     lvl = {"NORMAL": 0, "PRECAUCIÓN": 1, "CRÍTICO": 2}[row["alert_level"]]
@@ -262,8 +331,8 @@ def monitor(crew, radius, playing):
         if st.button("Estoy bien, cancelar aviso", key="ack"):
             alerts.acknowledge(em, now)
             st.rerun(scope="fragment")
-    elif em.phase == "SENT" and ss.log:
-        last = ss.log[0]
+    elif em.phase == "SENT" and last_alert(crew):
+        last = last_alert(crew)
         who = ", ".join(f"{c} ({r}, {d:.0f} m)" for c, r, d in last["notified"]) or "nadie dentro del radio"
         st.markdown(f'<div class="banner sos"><b>Alerta enviada a las {last["when"]}.</b> '
                     f'Avisados: {who}.</div>', unsafe_allow_html=True)
@@ -304,8 +373,8 @@ def monitor(crew, radius, playing):
     rows = "".join(f"<tr><td>{c}</td><td>{inf['role']}</td><td>{inf['module']}</td><td>{d:.0f} m</td></tr>"
                    for c, inf, d in near) or '<tr><td colspan="4">Nadie dentro del radio de aviso.</td></tr>'
     chans = ""
-    if ss.log:
-        chans = "<br>Último aviso: " + " · ".join(f"{n_}: {s}" for n_, s in ss.log[0]["channels"])
+    if last_alert(crew):
+        chans = "<br>Último aviso: " + " · ".join(f"{n_}: {s}" for n_, s in last_alert(crew)["channels"])
     st.markdown(f'<div class="panel"><div class="ttl" style="font-size:1.05rem;margin-bottom:8px">'
                 f'Tripulantes que recibirían el aviso</div>'
                 f'<table class="near"><tr><th>Persona</th><th>Rol</th><th>Módulo</th><th>Distancia</th></tr>{rows}</table>'
@@ -404,7 +473,240 @@ def who5_panel(who, last):
                 st.rerun()
 
 
-tab1, tab2 = st.tabs(["Monitor de salud", "Luma, tu compañero"])
+# ---------------------------------------------------------------- centro de control
+STATE_COLOR = {"online": "#3ef0b0", "stale": "#ffc857", "offline": "#ff4d6d"}
+STATE_TXT = {"online": "en línea", "stale": "retrasado", "offline": "sin señal"}
+
+
+def spark(vals, color, w=150, h=34):
+    """Mini gráfica SVG (sin dependencias) de los últimos valores."""
+    pts = [float(v) for v in vals if v == v]
+    if len(pts) < 2:
+        return f'<svg width="{w}" height="{h}"></svg>'
+    lo, hi = min(pts), max(pts)
+    span = (hi - lo) or 1.0
+    xs = [k * (w - 4) / (len(pts) - 1) + 2 for k in range(len(pts))]
+    ys = [h - 4 - (v - lo) / span * (h - 8) for v in pts]
+    path = " ".join(f"{'M' if k == 0 else 'L'}{x:.1f},{y:.1f}" for k, (x, y) in enumerate(zip(xs, ys)))
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}"><path d="{path}" fill="none" '
+            f'stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+
+
+def crew_overview(c):
+    """Todo lo que la tarjeta de un astronauta necesita saber."""
+    cur, em = ss.cur[c], ss.em[c]
+    if c not in data:                      # solo dispositivos reales
+        empty = pd.DataFrame(columns=NO_DATA_COLS)
+        if cur["status"] == "NO_DATA":
+            return dict(cur=cur, em=em, win=empty, rank=0, label="Sin telemetría", color="#8fb4d9",
+                        level=0, mood="reposo", who5=ss.checkins.get(c), nodata=True)
+        df, i = empty, 0
+    else:
+        df, i = data[c], cur["i"]
+    win = df.iloc[max(0, i - WINDOW + 1): i + 1]
+    physio = companion.physio_state(win) if len(win) else {"level": 0, "reasons": []}
+    last = ss.checkins.get(c)
+    level, escalate = companion.combine(physio["level"], companion.who5_level(last["raw"]) if last else None)
+    status, row = cur["status"], cur["row"]
+    phone_alert = next((d["alert"] for d in ss.devs if d.get("crew") == c and d.get("alert")
+                        and d["state"] != "offline"), None)
+    if phone_alert:
+        rank, label, color = 3, "Alerta: " + phone_alert, LEVEL_COLOR[2]
+    elif status == "NO_VITALS" or em.phase in ("CONFIRMING", "SENT"):
+        rank, label, color = 3, "Sin signos vitales", LEVEL_COLOR[2]
+    elif status == "SENSOR_FAULT":
+        rank, label, color = 2, "Sensor con falla", LEVEL_COLOR[1]
+    else:
+        lv = {"NORMAL": 0, "PRECAUCIÓN": 1, "CRÍTICO": 2}[row["alert_level"]]
+        rank = 2 if lv == 2 else (1 if lv == 1 or level >= 1 else 0)
+        label, color = row["alert_level"].capitalize(), LEVEL_COLOR[max(lv, min(level, 1))]
+        if escalate:
+            rank, label, color = max(rank, 2), "Apoyo sugerido", LEVEL_COLOR[1]
+    mood = pick_mood(level, emergency=bool(ss.crisis.get(c)) or rank == 3)
+    return dict(cur=cur, em=em, win=df.iloc[max(0, i - 39): i + 1], rank=rank, label=label, color=color,
+                level=level, mood=mood, who5=last, nodata=False)
+
+
+def crew_card(c, ov, devs):
+    info, row = alerts.ROSTER[c], ov["cur"]["row"]
+    vals = [("FC", "hr", row["heart_rate_bpm"], "bpm", "{:.0f}"), ("SpO₂", "spo2", row["spo2_pct"], "%", "{:.1f}"),
+            ("HRV", "hrv", row["hrv_rmssd_ms"], "ms", "{:.0f}"), ("Temp", "temp", row["body_temp_c"], "°C", "{:.1f}")]
+    cells = ""
+    for lb, key, v, unit, fmt in vals:
+        if pd.isna(v):
+            col, txt = ("#8fb4d9" if ov["nodata"] else LEVEL_COLOR[2]), "—"
+        else:
+            col, txt = LEVEL_COLOR[RULES[key](v)], fmt.format(v)
+        cells += f'<div style="--c:{col}"><div class="lb">{lb}</div><div class="vl">{txt}<span>{unit}</span></div></div>'
+    badges = '<span class="badge" style="--c:#8fb4d9">🧪 Simulado</span>'
+    for d in sorted((d for d in devs if d.get("crew") == c), key=lambda d: d["device_id"]):
+        ico = fleet.KINDS[d["kind"]][0]
+        badges += (f'<span class="badge" style="--c:{STATE_COLOR[d["state"]]}">{ico} {escape(str(d["name"]))} · '
+                   f'{STATE_TXT[d["state"]]}</span>')
+    who = ov["who5"]
+    meta = f'Ánimo de Luma: {ov["mood"]}' + (f' · WHO-5 {who["pct"]} %' if who else " · sin check-in")
+    if not pd.isna(row["cabin_co2_ppm"]):
+        meta += f' · {row["cabin_co2_ppm"]:.0f} ppm CO₂ · {row["radiation_rate_usv_h"]:.0f} µSv/h'
+    spk = (spark(ov["win"]["heart_rate_bpm"], "#38e1ff") + spark(ov["win"]["hrv_rmssd_ms"], "#8b7cff"))
+    alarm = " alarm" if ov["rank"] == 3 else ""
+    return (f'<div class="fcard{alarm}" style="--c:{ov["color"]}"><div class="fhead"><div>'
+            f'<div class="ttl" style="font-size:1.25rem;font-weight:600">{escape(c)}</div>'
+            f'<div class="sub" style="margin:0">{escape(info["role"])} · {escape(info["module"])}</div></div>'
+            f'<span class="chip" style="--c:{ov["color"]}">{escape(ov["label"])}</span></div>'
+            f'<div class="fgrid">{cells}</div>{spk}<div style="margin-top:4px">{badges}</div>'
+            f'<div class="fmeta">{escape(meta)}</div></div>')
+
+
+def pick_crew(c):
+    """Callback del botón «Monitorear»: cambia el astronauta de la pestaña Monitor de salud."""
+    ss.crew_pick = c
+
+
+def fleet_table(devs):
+    rows = []
+    for c in ss.cur:
+        if c not in data:
+            continue
+        rows.append({"Dispositivo": "Sensores simulados (CSV)", "Tipo": "🧪 Simulado", "Astronauta": c,
+                     "Estado": "🟢 en línea" if ss.playing else "⏸ en pausa", "Último dato": "ahora",
+                     "FC (bpm)": None, "Batería (%)": None, "Detalle": "Telemetría de demostración"})
+    for d in devs:
+        age = d["age"]
+        rows.append({
+            "Dispositivo": str(d["name"]), "Tipo": " ".join(fleet.KINDS[d["kind"]]),
+            "Astronauta": d.get("crew") or "—",
+            "Estado": {"online": "🟢", "stale": "🟡", "offline": "🔴"}[d["state"]] + " " + STATE_TXT[d["state"]],
+            "Último dato": f"hace {age:.0f} s" if age < 90 else f"hace {age / 60:.0f} min",
+            "FC (bpm)": d.get("heart_rate_bpm"), "Batería (%)": d.get("battery_pct"),
+            "Detalle": d.get("detail") or ("Pulso por cámara (experimental)" if d["kind"] == "camera" else "")})
+    return pd.DataFrame(rows)
+
+
+def fleet_chart(ov_all, col, title, unit):
+    f = go.Figure()
+    for c, ov in ov_all.items():
+        y = ov["win"][col]
+        if not len(y):
+            continue
+        f.add_trace(go.Scatter(x=list(range(-len(y) + 1, 1)), y=y, name=c, mode="lines",
+                               line=dict(width=3 if ov["rank"] >= 2 else 2, shape="spline")))
+    f.update_layout(title=dict(text=f"{title} ({unit})", font=dict(size=14, family="Chakra Petch"),
+                               x=0.01, y=0.97, yanchor="top"))
+    f.update_xaxes(title="registros atrás")
+    return style(f, 250)
+
+
+@st.fragment(run_every=1.0)
+def control_center():
+    """Vista de toda la tripulación y todos los dispositivos."""
+    tick()
+    devs = ss.devs
+    crews = all_crew()
+    ov_all = {c: crew_overview(c) for c in crews}
+    reporting = [d for d in devs]
+    online = sum(d["state"] == "online" for d in reporting)
+    ok = sum(ov["rank"] == 0 for ov in ov_all.values())
+    alarms = sum(ov["rank"] >= 2 for ov in ov_all.values())
+    rows = [ss.cur[c]["row"] for c in crews]
+    co2s = [r["cabin_co2_ppm"] for r in rows if not pd.isna(r["cabin_co2_ppm"])]
+    rads = [r["radiation_rate_usv_h"] for r in rows if not pd.isna(r["radiation_rate_usv_h"])]
+    top_co2, top_rad = (max(co2s) if co2s else np.nan), (max(rads) if rads else np.nan)
+
+    k = st.columns(4)
+    k[0].markdown(f'<div class="kpi" style="--c:{LEVEL_COLOR[0] if ok == len(crews) else LEVEL_COLOR[1]}">'
+                  f'<div class="lb">Tripulantes estables</div><div class="vl">{ok}<span>de {len(crews)}</span></div></div>',
+                  unsafe_allow_html=True)
+    k[1].markdown(f'<div class="kpi" style="--c:{LEVEL_COLOR[2] if alarms else LEVEL_COLOR[0]}">'
+                  f'<div class="lb">Con alerta o apoyo sugerido</div><div class="vl">{alarms}<span>personas</span></div></div>',
+                  unsafe_allow_html=True)
+    k[2].markdown(f'<div class="kpi" style="--c:{LEVEL_COLOR[0] if online == len(reporting) else LEVEL_COLOR[1]}">'
+                  f'<div class="lb">Dispositivos en línea</div><div class="vl">{online}<span>de {len(reporting)} conectados</span></div></div>',
+                  unsafe_allow_html=True)
+    k[3].markdown(kpi("Peor CO₂ de cabina", "co2", top_co2, "ppm", "{:.0f}"),
+                  unsafe_allow_html=True)
+    rad_txt = "—" if pd.isna(top_rad) else f"{top_rad:.0f} µSv/h"
+    st.markdown(f'<div class="sub" style="margin:6px 0 2px">Radiación más alta ahora: <b>{rad_txt}</b> · '
+                f'Luma acompaña a cada astronauta; el dato de pulso real viene solo de relojes y teléfonos conectados.</div>',
+                unsafe_allow_html=True)
+
+    link_state, link_msg = crew_link.get_link().status()
+    st.caption(("🟢 " if link_state == "ok" else "🟠 ") + link_msg)
+
+    # Alertas que mandaron los teléfonos (servidor de tripulación)
+    for a_ in crew_link.get_link().open_alerts():
+        acks = " · ".join(f"{escape(str(k.get('callsign', '')))}: {escape(str(k.get('text', '')))}"
+                          for k in a_.get("acks", []))
+        st.markdown(f'<div class="banner sos"><b>📲 {escape(str(a_.get("kind", "ALERTA")))}</b> · '
+                    f'{escape(str(a_.get("message", "")))}' + (f'<br><small>{acks}</small>' if acks else "") + '</div>',
+                    unsafe_allow_html=True)
+        if st.button("Marcar resuelta", key=f"cc_res_{a_['id']}"):
+            crew_link.get_link().resolve(a_["id"])
+            st.rerun(scope="fragment")
+
+    # Avisos activos, del más urgente al menos
+    for c in sorted(crews, key=lambda c: -ov_all[c]["rank"]):
+        em, now = ov_all[c]["em"], time.time()
+        if em.phase == "CONFIRMING":
+            st.markdown(f'<div class="banner warn"><b>No detecto signos vitales de {escape(c)}.</b> '
+                        f'Aviso a la tripulación cercana en {max(0, em.deadline - now):.0f} s.</div>', unsafe_allow_html=True)
+            if st.button(f"{c}: estoy bien, cancelar aviso", key=f"cc_ack_{c}"):
+                alerts.acknowledge(em, now)
+                st.rerun(scope="fragment")
+        elif em.phase == "SENT" and last_alert(c):
+            la = last_alert(c)
+            who = ", ".join(f"{x} ({r}, {d:.0f} m)" for x, r, d in la["notified"]) or "nadie dentro del radio"
+            st.markdown(f'<div class="banner sos"><b>{escape(c)}: alerta enviada a las {la["when"]}.</b> '
+                        f'Avisados: {escape(who)}.</div>', unsafe_allow_html=True)
+
+    # Tarjetas: las más urgentes primero
+    order = sorted(crews, key=lambda c: (-ov_all[c]["rank"], c))
+    per_row = 2 if len(order) <= 4 else 3
+    for r0 in range(0, len(order), per_row):
+        cols = st.columns(per_row, gap="medium")
+        for col, c in zip(cols, order[r0:r0 + per_row]):
+            with col:
+                st.markdown(crew_card(c, ov_all[c], devs), unsafe_allow_html=True)
+                if st.button("Monitorear a " + c, key=f"cc_pick_{c}", on_click=pick_crew, args=(c,)):
+                    st.rerun()  # recarga completa para que cambie la pestaña Monitor de salud
+
+    a, b = st.columns(2)
+    a.plotly_chart(fleet_chart(ov_all, "heart_rate_bpm", "Frecuencia cardíaca de toda la tripulación", "bpm"),
+                   width="stretch", key="cc_hr")
+    b.plotly_chart(fleet_chart(ov_all, "hrv_rmssd_ms", "HRV de toda la tripulación", "ms"),
+                   width="stretch", key="cc_hrv")
+
+    st.markdown('<div class="ttl" style="font-size:1.1rem;margin:6px 0">Dispositivos</div>', unsafe_allow_html=True)
+    st.dataframe(fleet_table(devs), hide_index=True, width="stretch")
+    if not devs:
+        st.caption("Aún no hay dispositivos reales conectados: todo lo que ves viene del CSV simulado.")
+
+    with st.expander("Conectar teléfonos y otras laptops"):
+        ip = fleet.lan_ip()
+        st.markdown(
+            "**Teléfonos (app BioOrbit):**\n\n"
+            "1. En otra terminal con el venv activo: `python crew_server/server.py` (puerto 8765).\n"
+            f"2. Cada astronauta abre la app en el mismo Wi-Fi, crea su cuenta y elige su puesto (ASTRO-01 a 04). "
+            f"Si no encuentra el servidor, escribe `{ip}:8765`.\n"
+            "3. Esta consola entra sola como «control» y muestra los teléfonos en cuanto sincronizan.\n\n"
+            "**Otra laptop con el HUD de cámara:**\n\n"
+            f"1. Aquí: `python src/fleet_server.py` (puerto {fleet.PORT}).\n"
+            f"2. En la otra laptop: `$env:BIOORBIT_FLEET_URL=\"http://{ip}:{fleet.PORT}\"` y luego el HUD.")
+        st.caption("Solo para una red local de confianza. Un reloj o teléfono con reloj que mandaba pulso y se calla "
+                   "cuenta como pérdida de signos vitales (con cuenta regresiva). El pulso por cámara no dispara alertas.")
+
+    with st.expander("Historial de avisos"):
+        if ss.log:
+            st.dataframe(pd.DataFrame([{"Hora": a_["when"], "Tipo": a_["kind"], "Astronauta": a_["crew"],
+                                        "Avisados": ", ".join(x for x, _, _ in a_["notified"]) or "nadie"}
+                                       for a_ in ss.log[:10]]), hide_index=True, width="stretch")
+        else:
+            st.caption("Sin avisos todavía.")
+
+
+tick()
+tab0, tab1, tab2 = st.tabs(["Centro de control", "Monitor de salud", "Luma, tu compañero"])
+with tab0:
+    control_center()
 with tab1:
     st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius, playing)
 with tab2:

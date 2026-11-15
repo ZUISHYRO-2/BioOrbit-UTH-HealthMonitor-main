@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BioOrbit · Control de misión</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#060918;--pn:rgba(18,24,58,.78);--ln:rgba(140,160,255,.18);--tx:#e8ecff;--mu:#8e98c8;--ok:#3ee6a8;--wa:#ffc04d;--cr:#ff4d6d;--vi:#8b7cff;--cy:#4dd8ff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:radial-gradient(1200px 700px at 80% -10%,#1b1550 0,transparent 60%),radial-gradient(900px 600px at -10% 110%,#0d2a4a 0,transparent 60%),var(--bg);color:var(--tx);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+.btn{border:1px solid var(--ln);background:rgba(255,255,255,.06);border-radius:10px;padding:8px 14px;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.12)}
+.btn.primary{background:linear-gradient(135deg,#6a5cff,#3fb8ff);border:0;font-weight:600}
+.btn.small{padding:4px 10px;font-size:12px}
+.btn.ok{background:rgba(62,230,168,.15);border-color:rgba(62,230,168,.5)}
+.btn.cr{background:rgba(255,77,109,.18);border-color:rgba(255,77,109,.6)}
+input{background:rgba(255,255,255,.06);border:1px solid var(--ln);border-radius:10px;padding:9px 12px;outline:none}
+input:focus{border-color:var(--vi)}
+.hidden{display:none!important}
+/* login */
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#login form{width:min(360px,92vw);background:var(--pn);border:1px solid var(--ln);border-radius:18px;padding:26px;display:flex;flex-direction:column;gap:12px;backdrop-filter:blur(10px)}
+#login h1{margin:0;font-size:22px;letter-spacing:.04em}
+#login p{margin:0;color:var(--mu);font-size:13px}
+.err{color:var(--cr);font-size:13px;min-height:18px}
+/* layout */
+header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--ln);background:rgba(6,9,24,.6);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+.brand{font-weight:800;font-size:18px;letter-spacing:.06em}
+.brand span{display:block;font-size:11px;font-weight:500;color:var(--mu);letter-spacing:.08em}
+.pill{padding:5px 12px;border-radius:999px;border:1px solid var(--ln);font-size:12px;color:var(--mu)}
+.pill b{color:var(--tx)}
+.grow{flex:1}
+#clock{font-variant-numeric:tabular-nums;font-weight:700;font-size:16px}
+#conn.bad{color:var(--cr);border-color:var(--cr)}
+main{display:grid;grid-template-columns:1fr 400px;gap:18px;padding:18px 22px;height:calc(100vh - 68px)}
+@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}}
+.col{display:flex;flex-direction:column;gap:14px;min-height:0}
+.panel{background:var(--pn);border:1px solid var(--ln);border-radius:16px;padding:14px 16px;backdrop-filter:blur(10px)}
+.ttl{font-weight:700;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mu);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+/* dispositivos */
+#devs{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
+.dev{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center;background:rgba(255,255,255,.04);border-radius:10px;padding:8px 10px;font-size:12px}
+.dev.off{opacity:.5}
+.dev b{font-size:13px}
+.dev small{color:var(--mu)}
+.dev .r{text-align:right}
+.tag{display:inline-block;border:1px solid var(--ln);border-radius:999px;padding:0 7px;font-size:10px;color:var(--mu);margin-left:4px}
+.tag.ok{color:var(--ok);border-color:var(--ok)}
+/* tripulación */
+#crew{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px;overflow:auto;padding-bottom:4px}
+.card{--c:var(--mu);position:relative;background:var(--pn);border:1px solid var(--ln);border-left:4px solid var(--c);border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.card.off{opacity:.55}
+.card.alarm{animation:alarm 1s infinite}
+@keyframes alarm{50%{box-shadow:0 0 0 3px var(--cr),0 0 30px rgba(255,77,109,.5)}}
+.who{display:flex;align-items:center;gap:10px}
+.av{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;background:linear-gradient(135deg,#6a5cff,#3fb8ff);flex:none}
+.who b{display:block;font-size:15px}
+.who small{color:var(--mu);font-size:12px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--mu);display:inline-block;margin-right:5px}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.st{font-weight:700;color:var(--c);font-size:13px}
+.vit{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.vit div{background:rgba(255,255,255,.04);border-radius:10px;padding:6px 8px}
+.vit span{display:block;font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.06em}
+.vit b{font-size:18px;font-variant-numeric:tabular-nums}
+.vit small{font-size:11px;color:var(--mu)}
+canvas.spark{width:100%;height:42px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.06);color:var(--mu)}
+.tag.cr{background:rgba(255,77,109,.2);color:#ffb3c1}
+.tag.ok{background:rgba(62,230,168,.14);color:#a8f5d8}
+.tag.wa{background:rgba(255,192,77,.16);color:#ffe0a6}
+.card .acts{display:flex;gap:6px}
+.empty{color:var(--mu);text-align:center;padding:30px 10px}
+/* alertas */
+#alerts{display:flex;flex-direction:column;gap:8px;max-height:30vh;overflow:auto}
+.al{border-radius:12px;padding:10px 12px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.45)}
+.al.done{background:rgba(255,255,255,.04);border-color:var(--ln);opacity:.7}
+.al .meta{font-size:11px;color:var(--mu);display:flex;justify-content:space-between;gap:8px}
+.al .acks{font-size:12px;color:var(--ok);margin-top:4px}
+.al .row{display:flex;gap:6px;margin-top:6px}
+/* chat */
+.chatp{flex:1;display:flex;flex-direction:column;min-height:320px}
+#chans{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+#chans button{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--ln);background:none;cursor:pointer;position:relative}
+#chans button.on{background:var(--vi);border-color:var(--vi)}
+#chans button i{position:absolute;top:-4px;right:-4px;width:9px;height:9px;border-radius:50%;background:var(--cr)}
+#log{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:4px 2px;min-height:120px}
+.m{max-width:85%;padding:7px 11px;border-radius:12px;background:rgba(255,255,255,.07);align-self:flex-start;white-space:pre-wrap;word-wrap:break-word}
+.m.me{align-self:flex-end;background:rgba(106,92,255,.35)}
+.m small{display:block;font-size:11px;color:var(--mu);margin-bottom:2px}
+.m.dm{border:1px dashed rgba(77,216,255,.5)}
+#chatForm{display:flex;gap:8px;margin-top:8px}
+#chatForm input{flex:1}
+.urls{font-size:12px;color:var(--mu)}
+.urls code{color:var(--cy)}
+</style>
+</head>
+<body>
+<div id="login">
+  <form id="loginForm">
+    <h1>BioOrbit · Control</h1>
+    <p>Dashboard de monitoreo de la tripulación.</p>
+    <input id="lUser" placeholder="Usuario" value="control" autocomplete="username">
+    <input id="lPass" type="password" placeholder="Contraseña" autocomplete="current-password">
+    <div class="err" id="lErr"></div>
+    <button class="btn primary">Entrar</button>
+    <p>La contraseña aparece en la ventana del servidor y en <code>crew_server/data/control_password.txt</code>.</p>
+  </form>
+</div>
+
+<div id="main" class="hidden">
+  <header>
+    <div class="brand">BIOORBIT<span>CONTROL DE MISIÓN · TRIPULACIÓN</span></div>
+    <div class="pill">En línea <b id="nOn">0</b> / <b id="nAll">0</b></div>
+    <div class="pill" id="nAl">Alertas abiertas <b>0</b></div>
+    <div class="grow"></div>
+    <div class="urls" id="urls"></div>
+    <div class="pill" id="conn">Conectado</div>
+    <div id="clock">--:--:--</div>
+    <button class="btn small" id="btnSound">🔔 Sonido</button>
+    <button class="btn small" id="btnOut">Salir</button>
+  </header>
+  <main>
+    <section class="col">
+      <div class="ttl">Tripulación</div>
+      <div id="crew"><div class="empty">Aún no hay astronautas. Crea las cuentas desde la app del teléfono.</div></div>
+    </section>
+    <section class="col">
+      <div class="panel">
+        <div class="ttl">Dispositivos conectados <span class="pill" id="nDev" style="margin-left:auto">0 / 0</span></div>
+        <div id="devs"><div class="empty">Ningún teléfono ha iniciado sesión todavía.</div></div>
+      </div>
+      <div class="panel">
+        <div class="ttl">Alertas</div>
+        <div id="alerts"><div class="empty">Sin alertas.</div></div>
+      </div>
+      <div class="panel chatp">
+        <div class="ttl">Chat interno</div>
+        <div id="chans"></div>
+        <div id="log"></div>
+        <form id="chatForm"><input id="chatTxt" placeholder="Mensaje para toda la tripulación…" autocomplete="off" maxlength="1000"><button class="btn primary">Enviar</button></form>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const KIND = { NO_VITALS: 'Sin signos vitales', NO_PRESENCE: 'No aparece en cámara', SOS: 'SOS por voz', SUPPORT: 'Pide apoyo humano', ALERTA: 'Alerta' };
+  const LEVEL = { NORMAL: ['Estable', 'var(--ok)'], 'PRECAUCIÓN': ['Precaución', 'var(--wa)'], 'CRÍTICO': ['Crítico', 'var(--cr)'], 'SIN SEÑAL': ['Sin señal', 'var(--cr)'] };
+  const S = { token: sessionStorage.getItem('bo_token') || '', me: null, crew: [], msgs: [], since: 0, alerts: new Map(), chan: '', unread: {}, sound: true, failing: 0, seenAlerts: new Set(), first: true };
+  const fmtT = ts => new Date(ts * 1000).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  const ago = ts => { if (!ts) return 'nunca'; const s = Date.now() / 1000 - ts; return s < 60 ? 'hace ' + Math.round(s) + ' s' : s < 3600 ? 'hace ' + Math.round(s / 60) + ' min' : fmtT(ts); };
+  const nameOf = u => { if (!u) return 'Todos'; if (u === 'control') return 'Control'; const c = S.crew.find(x => x.username === u); return c ? `${c.callsign} · ${c.name}` : u; };
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  async function api(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.token }, body: JSON.stringify(body || {}) });
+    const j = await r.json().catch(() => ({ ok: false, error: 'respuesta inválida' }));
+    if (r.status === 401 && path !== '/api/login') { logout(); }
+    if (!j.ok) throw new Error(j.error || 'error');
+    return j;
+  }
+
+  // ---------- sesión
+  $('loginForm').onsubmit = async e => {
+    e.preventDefault(); $('lErr').textContent = '';
+    try {
+      const j = await api('/api/login', { username: $('lUser').value, password: $('lPass').value });
+      if (j.user.kind !== 'control') { $('lErr').textContent = 'Esa cuenta es de astronauta. Usa la cuenta «control».'; return; }
+      S.token = j.token; sessionStorage.setItem('bo_token', S.token); start();
+    } catch (err) { $('lErr').textContent = err.message; }
+  };
+  function logout() { api('/api/logout').catch(() => {}); S.token = ''; sessionStorage.removeItem('bo_token'); location.reload(); }
+  $('btnOut').onclick = logout;
+  $('btnSound').onclick = () => { S.sound = !S.sound; $('btnSound').textContent = S.sound ? '🔔 Sonido' : '🔕 Silencio'; if (S.sound) beep(1); };
+
+  // ---------- sonido de alarma
+  let actx;
+  function beep(n = 3) {
+    if (!S.sound) return;
+    try {
+      actx = actx || new AudioContext();
+      for (let i = 0; i < n; i++) {
+        const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.35;
+        o.frequency.value = 880; o.type = 'square'; g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.26);
+      }
+    } catch (e) { /* sin audio */ }
+  }
+
+  // ---------- sincronización
+  async function sync() {
+    try {
+      const j = await api('/api/sync', { since_msg: S.since });
+      S.failing = 0; $('conn').textContent = 'Conectado'; $('conn').classList.remove('bad');
+      S.me = j.me; S.crew = j.crew; S.devices = j.devices || [];
+      for (const m of j.messages) {
+        S.msgs.push(m); S.since = Math.max(S.since, m.id);
+        const ch = chanOf(m);
+        if (!S.first && ch !== S.chan && m.from !== 'control') S.unread[ch] = (S.unread[ch] || 0) + 1;
+      }
+      S.msgs = S.msgs.slice(-500);
+      let fresh = false;
+      for (const a of j.alerts) {
+        if (!S.seenAlerts.has(a.id)) { S.seenAlerts.add(a.id); if (!S.first && !a.resolved) fresh = true; }
+        S.alerts.set(a.id, a);
+      }
+      if (fresh) beep(4);
+      S.first = false;
+      render();
+    } catch (e) {
+      if (++S.failing > 1) { $('conn').textContent = 'Sin conexión con el servidor'; $('conn').classList.add('bad'); }
+    }
+  }
+  function chanOf(m) { if (!m.to) return ''; return m.from === 'control' ? m.to : (m.to === 'control' ? m.from : m.from); }
+
+  // ---------- render
+  function render() {
+    const crew = S.crew, on = crew.filter(c => c.online).length;
+    $('nOn').textContent = on; $('nAll').textContent = crew.length;
+    const open = [...S.alerts.values()].filter(a => !a.resolved);
+    $('nAl').innerHTML = ''; $('nAl').append('Alertas abiertas ', el('b', '', open.length));
+    $('nAl').style.borderColor = open.length ? 'var(--cr)' : ''; $('nAl').style.color = open.length ? 'var(--cr)' : '';
+    renderCrew(open); renderDevs(); renderAlerts(); renderChans(); renderLog();
+  }
+
+  function renderDevs() {
+    const box = $('devs'), list = (S.devices || []).slice()
+      .sort((a, b) => (b.online - a.online) || ((b.last_seen || 0) - (a.last_seen || 0)));
+    $('nDev').textContent = `${list.filter(c => c.online).length} / ${list.length}`;
+    box.textContent = '';
+    if (!list.length) { box.append(el('div', 'empty', 'Ningún teléfono ha iniciado sesión todavía.')); return; }
+    for (const c of list) {
+      const st = c.status || {}, d = el('div', 'dev' + (c.online ? '' : ' off'));
+      const dot = el('span', 'dot' + (c.online ? ' on' : ''));
+      const l = el('div'); const b = el('b', '', c.device || 'sin ID'); l.append(b, el('br'), el('small', '', `${c.name} · ${c.callsign}`));
+      const r = el('div', 'r'); r.append(el('b', '', c.online ? 'En línea' : 'Desconectado'), el('br'), el('small', '', c.last_seen ? ago(c.last_seen) : '—'));
+      const sub = el('small', '', `${c.ip || '—'} · pulso: ${st.hr != null ? Math.round(st.hr) + ' bpm' : '—'}`);
+      const tags = el('div'); tags.style.gridColumn = '2 / 4';
+      tags.append(sub);
+      if (st.hr_src) tags.append(el('span', 'tag', st.hr_src));
+      if (st.watch) tags.append(el('span', 'tag ok', 'reloj'));
+      if (st.cam) tags.append(el('span', 'tag ok', 'cámara'));
+      if (st.bg) tags.append(el('span', 'tag', 'segundo plano'));
+      if (st.alert) tags.append(el('span', 'tag', st.alert));
+      d.append(dot, l, r, el('span'), tags);
+      box.append(d);
+    }
+  }
+
+  function renderCrew(open) {
+    const box = $('crew');
+    if (!S.crew.length) { if (!box.querySelector('.empty')) { box.textContent = ''; box.append(el('div', 'empty', 'Aún no hay astronautas. Crea las cuentas desde la app del teléfono.')); } return; }
+    box.textContent = '';
+    for (const c of S.crew) {
+      const s = c.status || {}, alarm = open.some(a => a.username === c.username);
+      const [lvTxt, col] = !c.online ? ['Desconectado', 'var(--mu)'] : (LEVEL[s.level] || LEVEL.NORMAL);
+      const card = el('div', 'card' + (c.online ? '' : ' off') + (alarm ? ' alarm' : ''));
+      card.style.setProperty('--c', alarm ? 'var(--cr)' : col);
+      const who = el('div', 'who');
+      who.append(el('div', 'av', (c.callsign || '?').replace(/[^A-Z0-9]/gi, '').slice(-2)));
+      const nm = el('div'); nm.style.flex = '1';
+      nm.append(el('b', '', c.name)); nm.append(el('small', '', `${c.callsign} · ${c.role} · ${c.module}`));
+      who.append(nm);
+      const stx = el('div', 'st'); stx.append(el('span', 'dot' + (c.online ? ' on' : ''))); stx.append(alarm ? 'ALERTA' : lvTxt);
+      who.append(stx); card.append(who);
+
+      const vit = el('div', 'vit');
+      const tile = (lab, v, unit) => { const d = el('div'); d.append(el('span', '', lab)); const b = el('b', '', v == null || v === '' ? '—' : v); d.append(b); if (unit) d.append(el('small', '', ' ' + unit)); return d; };
+      vit.append(tile('Pulso' + (s.hr_src ? ' · ' + s.hr_src : ''), s.hr != null ? Math.round(s.hr) : null, 'bpm'));
+      vit.append(tile('SpO₂', s.spo2 != null ? Number(s.spo2).toFixed(0) : null, '%'));
+      vit.append(tile('Temp.', s.temp != null ? Number(s.temp).toFixed(1) : null, '°C'));
+      card.append(vit);
+
+      const cv = el('canvas', 'spark'); card.append(cv); requestAnimationFrame(() => spark(cv, c.hr_hist || [], col));
+
+      const tags = el('div', 'tags');
+      const tag = (t, k) => tags.append(el('span', 'tag ' + (k || ''), t));
+      if (!c.online) tag('Visto ' + ago(c.last_seen));
+      else {
+        if (s.cam) tag(s.present ? 'En cámara ✓' : 'No aparece en cámara', s.present ? 'ok' : 'wa'); else tag('Cámara apagada');
+        if (s.watch) tag('Reloj conectado', 'ok');
+        if (s.bg) tag('App minimizada');
+        if (s.alert) tag(KIND[s.alert] || s.alert, 'cr');
+        if (s.mood) tag('Luma: ' + s.mood);
+        if (s.music) tag('♪ ' + s.music);
+      }
+      card.append(tags);
+      const acts = el('div', 'acts');
+      const bMsg = el('button', 'btn small', 'Mensaje privado'); bMsg.onclick = () => { S.chan = c.username; S.unread[c.username] = 0; renderChans(); renderLog(); $('chatTxt').focus(); };
+      acts.append(bMsg);
+      const bDel = el('button', 'btn small', 'Quitar'); bDel.title = 'Borrar la cuenta de este astronauta';
+      bDel.onclick = async () => { if (confirm(`¿Borrar la cuenta de ${c.name}? Tendrá que registrarse de nuevo.`)) { await api('/api/remove_user', { username: c.username }).catch(e => alert(e.message)); sync(); } };
+      acts.append(bDel); card.append(acts);
+      box.append(card);
+    }
+  }
+  function spark(cv, data, col) {
+    const w = cv.width = cv.clientWidth * devicePixelRatio, h = cv.height = cv.clientHeight * devicePixelRatio, g = cv.getContext('2d');
+    g.clearRect(0, 0, w, h);
+    if (data.length < 2) { g.fillStyle = 'rgba(142,152,200,.5)'; g.font = `${11 * devicePixelRatio}px system-ui`; g.fillText('Pulso de los últimos 5 min', 4, h / 2 + 4); return; }
+    const lo = Math.min(...data) - 5, hi = Math.max(...data) + 5;
+    g.strokeStyle = getComputedStyle(document.body).getPropertyValue(col.replace(/var\((.*)\)/, '$1')).trim() || '#8b7cff';
+    g.lineWidth = 2 * devicePixelRatio; g.beginPath();
+    data.forEach((v, i) => { const x = i / (data.length - 1) * w, y = h - (v - lo) / (hi - lo) * (h - 4) - 2; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  }
+
+  function renderAlerts() {
+    const box = $('alerts'), list = [...S.alerts.values()].sort((a, b) => b.ts - a.ts).slice(0, 30);
+    box.textContent = '';
+    if (!list.length) { box.append(el('div', 'empty', 'Sin alertas.')); return; }
+    for (const a of list) {
+      const d = el('div', 'al' + (a.resolved ? ' done' : ''));
+      const meta = el('div', 'meta'); meta.append(el('b', '', KIND[a.kind] || a.kind)); meta.append(el('span', '', fmtT(a.ts) + (a.resolved ? ' · resuelta' : '')));
+      d.append(meta); d.append(el('div', '', a.message));
+      if (a.acks && a.acks.length) d.append(el('div', 'acks', a.acks.map(k => `${k.callsign}: ${k.text}`).join(' · ')));
+      if (!a.resolved) {
+        const row = el('div', 'row');
+        const b1 = el('button', 'btn small', 'Enterado'); b1.onclick = () => api('/api/alert_ack', { id: a.id, text: 'Control enterado' }).then(sync);
+        const b2 = el('button', 'btn small ok', 'Marcar resuelta'); b2.onclick = () => api('/api/alert_ack', { id: a.id, text: 'Resuelta por control', resolve: true }).then(sync);
+        row.append(b1, b2); d.append(row);
+      }
+      box.append(d);
+    }
+  }
+
+  function renderChans() {
+    const box = $('chans'); box.textContent = '';
+    const mk = (id, label) => { const b = el('button', id === S.chan ? 'on' : '', label); if (S.unread[id] && id !== S.chan) b.append(el('i')); b.onclick = () => { S.chan = id; S.unread[id] = 0; renderChans(); renderLog(); }; box.append(b); };
+    mk('', '# Tripulación');
+    S.crew.forEach(c => mk(c.username, '✉ ' + c.callsign));
+    $('chatTxt').placeholder = S.chan ? `Mensaje privado para ${nameOf(S.chan)}…` : 'Mensaje para toda la tripulación…';
+  }
+  function renderLog() {
+    const log = $('log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+    log.textContent = '';
+    const list = S.msgs.filter(m => S.chan === '' ? !m.to : (m.to && (m.from === S.chan || m.to === S.chan)));
+    if (!list.length) log.append(el('div', 'empty', S.chan ? 'Sin mensajes privados.' : 'Sin mensajes todavía.'));
+    for (const m of list) {
+      const d = el('div', 'm' + (m.from === 'control' ? ' me' : '') + (m.to ? ' dm' : ''));
+      d.append(el('small', '', `${nameOf(m.from)}${m.to ? ' → ' + nameOf(m.to) : ''} · ${fmtT(m.ts)}`));
+      d.append(document.createTextNode(m.text)); log.append(d);
+    }
+    if (stick) log.scrollTop = log.scrollHeight;
+  }
+  $('chatForm').onsubmit = async e => {
+    e.preventDefault(); const t = $('chatTxt').value.trim(); if (!t) return;
+    $('chatTxt').value = '';
+    try { await api('/api/chat', { text: t, to: S.chan }); sync(); } catch (err) { alert(err.message); $('chatTxt').value = t; }
+  };
+
+  async function start() {
+    $('login').classList.add('hidden'); $('main').classList.remove('hidden');
+    try {
+      const p = await (await fetch('/api/ping')).json();
+      $('urls').textContent = ''; if (p.lan && p.lan.length) { $('urls').append('Wi-Fi: '); $('urls').append(el('code', '', p.lan[0])); }
+      if (p.public) { $('urls').append(' · Datos: '); $('urls').append(el('code', '', p.public)); }
+    } catch (e) { /* nada */ }
+    await sync(); setInterval(sync, 2000);
+    setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString('es-MX'); }, 1000);
+  }
+  if (S.token) start();
+})();
+</script>
+</body>
+</html>
