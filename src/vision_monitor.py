@@ -7,6 +7,8 @@ Qué es real y qué es simulado (el HUD lo indica en pantalla):
   - Rostro fijado: detector Haar de OpenCV con suavizado; la caja se queda "enclavada" en tu cara.
   - Pulso: estimación rPPG experimental con la cámara (canal verde de la frente + FFT).
   - Estabilidad de cabeza: movimiento del rostro detectado.
+  - Reloj (Bluetooth LE): si hay un reloj conectado (consola web o watch_connect.py), la frecuencia
+    cardíaca viene del reloj; si deja de mandar pulso, se dispara la alerta de signos vitales.
   - SpO2, temperatura, CO2, radiación, HRV: telemetría SIMULADA del CSV (data_pipeline).
   - Alerta por pérdida de signos vitales: usa esa telemetría (tecla S para simularla).
   - Luma: robot compañero; su ánimo cambia con tu estado y te mira. Para conversar: streamlit run src/app.py
@@ -26,6 +28,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 import alerts
+import ble_watch
 import companion
 from data_pipeline import calculate_health_scores, load_telemetry
 from luma import LumaSprite, pick_mood
@@ -323,7 +326,8 @@ class State:
         self.refresh()
 
     def refresh(self):
-        self.row = self.df.iloc[self.i].copy()
+        self.watch, self.watch_data = ble_watch.watch_state()
+        self.row = ble_watch.apply_watch(self.df.iloc[self.i], self.watch, self.watch_data)
         win = self.df.iloc[max(0, self.i - WINDOW + 1): self.i + 1].copy()
         if self.flat:
             self.row[VITAL] = np.nan
@@ -408,7 +412,7 @@ class State:
         companion.write_vision_status(
             crew=self.crew, face_locked=self.face is not None,
             bpm=round(self.bpm, 1) if self.bpm else None, quality=round(self.q, 1),
-            stability=self.stability()[0], mood=self.mood, level=self.physio["level"])
+            stability=self.stability()[0], mood=self.mood, level=self.physio["level"], watch=self.watch)
 
 
 # ------------------------------------------------------------------ dibujo
@@ -466,15 +470,23 @@ def draw_hud(frame, S, now, dt):
     # Panel derecho: telemetría simulada
     glass(frame, W - 324, 90, 300, 330, VI)
     text(W - 304, 122, "Telemetría de cabina", 17, TX, True)
-    text(W - 304, 142, f"simulada · {row['timestamp']:%d %b %H:%M}", 12, MU)
-    items = [("SpO₂", row["spo2_pct"], "%", "{:.1f}", lambda v: v >= 96),
+    if S.watch == "live":
+        dev = (S.watch_data or {}).get("device_name", "reloj")
+        text(W - 304, 142, f"FC del reloj ({dev[:18]}) · resto simulado", 12, OK)
+    elif S.watch == "lost":
+        text(W - 304, 142, "Reloj sin señal de pulso", 12, CR, True)
+    else:
+        text(W - 304, 142, f"simulada · {row['timestamp']:%d %b %H:%M}", 12, MU)
+    hr_lab = "Frec. cardíaca (reloj)" if S.watch == "live" else "Frec. cardíaca"
+    items = [(hr_lab, row["heart_rate_bpm"], "bpm", "{:.0f}", lambda v: 55 <= v <= 100),
+             ("SpO₂", row["spo2_pct"], "%", "{:.1f}", lambda v: v >= 96),
              ("Temperatura", row["body_temp_c"], "°C", "{:.1f}", lambda v: 36 <= v <= 37.5),
              ("CO₂ de cabina", row["cabin_co2_ppm"], "ppm", "{:,.0f}", lambda v: v < 4000),
              ("Radiación", row["radiation_rate_usv_h"], "µSv/h", "{:.0f}", lambda v: v < 35),
              ("HRV", row["hrv_rmssd_ms"], "ms", "{:.0f}", lambda v: v >= 40),
              ("Sueño (eficiencia)", row["sleep_efficiency_pct"], "%", "{:.0f}", lambda v: v >= 80)]
     for k, (lab, v, unit, fmt, good) in enumerate(items):
-        y = 184 + k * 40
+        y = 180 + k * 34
         missing = v != v
         col = CR if missing else (OK if good(v) else WA)
         cv2.circle(frame, (W - 300, y - 6), 5, bgr(col), -1, cv2.LINE_AA)
@@ -491,7 +503,9 @@ def draw_hud(frame, S, now, dt):
     else:
         look = (math.sin(now * 0.7) * 0.7, math.sin(now * 0.45) * 0.3)
     S.luma.update(dt, S.mood, look)
-    S.luma.draw(frame, lx, ly, 0.5, S.mood, S.bpm or (row["heart_rate_bpm"] if row["heart_rate_bpm"] == row["heart_rate_bpm"] else 70))
+    hr_row = row["heart_rate_bpm"] if row["heart_rate_bpm"] == row["heart_rate_bpm"] else None
+    heart = hr_row if S.watch == "live" else (S.bpm or hr_row or 70)
+    S.luma.draw(frame, lx, ly, 0.5, S.mood, heart)
     estado = {0: "estable", 1: "desgaste leve", 2: "desgaste alto"}[lvl]
     text(190, H - 166, "Luma", 18, mood_col, True)
     text(240, H - 166, f"· {S.mood} · {estado}", 12, MU)

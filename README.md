@@ -45,6 +45,31 @@ El HUD detecta tu cara con OpenCV (dos modelos Haar, imagen ecualizada) y la **d
 sobre tu rostro, con anillo giratorio y barrido. Una vez fijada, sigue a esa misma cara e ignora detecciones falsas de un
 instante; solo cambia de cara si la otra persiste ~0.5 s. Sobre esa región mide el pulso por rPPG.
 
+## ⌚ Reloj inteligente por Bluetooth (nuevo)
+
+La frecuencia cardíaca puede venir de un **reloj real** en lugar del CSV simulado:
+
+1. **En el reloj (Pixel Watch / Wear OS):** instala la app `wear-os-bridge/` (ábrela en Android Studio y córrela en el reloj).
+   Abre **BioOrbit Watch Bridge**, pulsa **Iniciar transmisión** y acepta los permisos. El reloj anuncia el perfil
+   estándar Bluetooth *Heart Rate* (0x180D) con tu pulso cada segundo.
+2. **En la laptop**, conéctalo de una de dos formas:
+   - Consola web → barra lateral → **Buscar relojes cercanos** → elige el reloj → **Conectar reloj**.
+   - Terminal: `python src/watch_connect.py` (Q o Esc para desconectar).
+3. El HUD de cámara y la consola leen el reloj solos (archivo `data/live_watch_telemetry.json`).
+   El reloj se asigna al astronauta que estás monitoreando.
+
+Sin reloj físico, el botón **Demo reloj** simula uno mandando pulso.
+
+**Pérdida de signos vitales con el reloj:** si el reloj estaba conectado y **deja de mandar pulso** (se lo quitan, se
+queda sin batería, sale de alcance) por más de 8 s, cuenta como pérdida de signos vitales: cuenta regresiva de 10 s y,
+si nadie pulsa "Estoy bien", aviso a los tripulantes cercanos. Si lo desconectas a propósito, no hay alarma.
+
+El Pixel Watch solo manda frecuencia cardíaca (sin intervalos RR), así que la HRV se queda con la telemetría simulada;
+con una banda o reloj que mande intervalos RR, la HRV se calcula en vivo (RMSSD). Funciona con cualquier dispositivo
+que tenga el perfil cardíaco estándar (bandas Polar, Garmin, etc.). En Windows usa el Bluetooth de la laptop (librería `bleak`).
+
+Pruebas: `python -m unittest tests.test_ble_watch`
+
 ## 🚨 Alerta a tripulantes cercanos
 
 Si faltan frecuencia cardíaca y SpO₂ varias lecturas seguidas, aparece una cuenta regresiva de 10 s ("Estoy bien").
@@ -91,8 +116,12 @@ BioOrbit-UTH-HealthMonitor/
 │   ├── companion.py                     # Cerebro de Luma: chat, consejos, WHO-5, lectura de señales
 │   ├── alerts.py                        # Pérdida de signos vitales y avisos a cercanos
 │   ├── alert_listener.py                # Receptor de alertas para equipos cercanos
+│   ├── ble_watch.py                     # Reloj por Bluetooth LE: escaneo, conexión, pulso, HRV
+│   ├── watch_connect.py                 # Conectar el reloj desde la terminal
 │   ├── data_pipeline.py                 # Pipeline de ingesta, HRV, alertas y dosis de radiación
 │   └── generate_demo_data.py            # Genera demo_stress_arc.csv
+├── tests/test_ble_watch.py              # Pruebas del conector del reloj
+├── wear-os-bridge/                      # App para el reloj (Kotlin): transmite el pulso por BLE
 ├── docs/
 │   ├── pitch_script_30s.md              # Guion de pitch de 30 segundos en inglés
 │   └── vista_previa_hud.png             # Captura del HUD

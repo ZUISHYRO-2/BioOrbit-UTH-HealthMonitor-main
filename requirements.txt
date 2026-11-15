@@ -9,3 +9,5 @@ requests>=2.31.0
 streamlit>=1.67.0
 plotly>=5.17.0
 pillow>=10.0.0
+# Reloj por Bluetooth LE (Pixel Watch / Wear OS con BioOrbit Watch Bridge)
+bleak>=0.22.0

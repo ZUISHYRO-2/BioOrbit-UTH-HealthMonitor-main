@@ -20,6 +20,7 @@ import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
 
 import alerts
+import ble_watch
 import companion
 from data_pipeline import calculate_health_scores, load_telemetry
 from luma import luma_html, pick_mood
@@ -117,6 +118,51 @@ ss.setdefault("log", [])
 ss.setdefault("checkins", {})
 ss.setdefault("talk_at", 0.0)
 
+# ---------------------------------------------------------------- reloj Bluetooth
+@st.fragment(run_every=2.0)
+def watch_status():
+    snap = ble_watch.get_watch_manager().get_snapshot()
+    state, _ = ble_watch.watch_state()
+    if state == "live":
+        st.markdown(f'<span class="chip" style="--c:#3ef0b0">⌚ {snap.device_name[:22]} · '
+                    f'{snap.heart_rate_bpm:.0f} bpm</span>', unsafe_allow_html=True)
+    elif state == "lost":
+        st.markdown('<span class="chip" style="--c:#ff4d6d">⌚ Reloj sin señal de pulso</span>',
+                    unsafe_allow_html=True)
+    st.caption(snap.status_message)
+
+
+def watch_sidebar():
+    """Conecta un reloj por Bluetooth LE (Pixel Watch con BioOrbit Watch Bridge u otro con perfil cardíaco)."""
+    st.caption("Reloj inteligente (Bluetooth)")
+    mgr = ble_watch.get_watch_manager()
+    if not ble_watch.BLEAK_AVAILABLE:
+        st.caption("Falta la librería `bleak`: `pip install -r requirements.txt`. Mientras, usa el modo demo.")
+    elif st.button("Buscar relojes cercanos", width="stretch"):
+        with st.spinner("Escaneando Bluetooth 10 s…"):
+            try:
+                found = ble_watch.scan_ble_devices_sync(timeout=10.0)
+                ss.ble_devices = [d for d in found if d.is_watch_candidate or d.has_hr_service]
+                if not ss.ble_devices:
+                    st.warning("No encontré relojes. Abre BioOrbit Watch Bridge en el reloj y pulsa «Iniciar transmisión».")
+            except Exception as exc:  # noqa: BLE001  (sin adaptador Bluetooth, permisos, etc.)
+                st.error(f"No se pudo escanear: {exc}")
+    devices = ss.get("ble_devices", [])
+    if devices:
+        k = st.selectbox("Reloj", range(len(devices)), key="ble_pick",
+                         format_func=lambda j: f"{devices[j].name} · {devices[j].rssi} dBm"
+                         + (" · ❤" if devices[j].has_hr_service else ""))
+        if st.button("Conectar reloj", width="stretch", type="primary"):
+            mgr.connect_ble(devices[k].address, devices[k].name)
+    c1, c2 = st.columns(2)
+    if c1.button("Demo reloj", width="stretch", help="Simula un Wear OS mandando pulso (sin reloj físico)."):
+        mgr.start_wear_simulator(scenario="nominal")
+    if c2.button("Desconectar", width="stretch"):
+        mgr.disconnect()
+    watch_status()
+    st.caption("El reloj se asigna al astronauta monitoreado.")
+
+
 # ---------------------------------------------------------------- barra lateral
 with st.sidebar:
     crew = st.selectbox("Astronauta monitoreado", list(data))
@@ -128,6 +174,8 @@ with st.sidebar:
         ss.flat[crew] = ss.idx[crew]
     if st.button("Restablecer sensores", width="stretch"):
         ss.flat[crew] = None
+    st.divider()
+    watch_sidebar()
     st.divider()
     cam = companion.read_vision_status()
     if cam:
@@ -181,7 +229,8 @@ def monitor(crew, radius, playing):
     df = data[crew]
     n = ss.idx[crew]
     i = n % len(df)
-    row = df.iloc[i].copy()
+    watch, watch_data = ble_watch.watch_state()
+    row = ble_watch.apply_watch(df.iloc[i], watch, watch_data)
     start = ss.flat[crew]
     if start is not None:
         row[VITAL] = np.nan
@@ -226,7 +275,14 @@ def monitor(crew, radius, playing):
                     unsafe_allow_html=True)
 
     cols = st.columns(6)
-    items = [("Frecuencia cardíaca", "hr", row["heart_rate_bpm"], "bpm", "{:.0f}"),
+    if watch == "live":
+        st.markdown(f'<div class="sub">⌚ Frecuencia cardíaca en vivo desde '
+                    f'<b>{(watch_data or {}).get("device_name", "reloj")}</b>; el resto de la telemetría es simulada.</div>',
+                    unsafe_allow_html=True)
+    elif watch == "lost":
+        st.markdown('<div class="banner warn"><b>El reloj dejó de mandar pulso.</b> '
+                    'Si no vuelve, se activa la alerta de signos vitales.</div>', unsafe_allow_html=True)
+    items = [("Frecuencia cardíaca" + (" · reloj" if watch == "live" else ""), "hr", row["heart_rate_bpm"], "bpm", "{:.0f}"),
              ("HRV", "hrv", row["hrv_rmssd_ms"], "ms", "{:.0f}"),
              ("SpO₂", "spo2", row["spo2_pct"], "%", "{:.1f}"),
              ("Temperatura", "temp", row["body_temp_c"], "°C", "{:.1f}"),

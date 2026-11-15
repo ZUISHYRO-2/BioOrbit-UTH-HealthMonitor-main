@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.pyc
 data/alerts_log.jsonl
+data/live_watch_telemetry.json*
