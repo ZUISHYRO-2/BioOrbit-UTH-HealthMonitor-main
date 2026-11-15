@@ -16,7 +16,7 @@ def load_telemetry(filepath: str) -> pd.DataFrame:
 def calculate_health_scores(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calcula índices fisiológicos compuestos:
-    - Cardiovascular Stress Index (CSI)
+    - Cardiovascular Stress Index (CSI)_
     - Autonomic Recovery Index (ARI basado en HRV)
     - Environmental Hazard Score (EHS basado en CO2 y radiación)
     - Composite Astronaut Risk Level (Normal, Alerta, Crítico)
