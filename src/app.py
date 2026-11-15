@@ -9,14 +9,16 @@ BioOrbit-UTH · Consola de cabina.
 - Centro de control: toda la tripulación y todos los dispositivos (reloj, cámara, móvil) en una sola vista.
 """
 
+import os
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
@@ -26,6 +28,7 @@ import ble_watch
 import companion
 import crew_link
 import fleet
+import nasa_data
 from data_pipeline import calculate_health_scores, load_telemetry
 from luma import luma_html, pick_mood
 
@@ -115,6 +118,11 @@ def show_html(html, height):
 def load(name):
     df = calculate_health_scores(load_telemetry(str(DATA_DIR / name))).sort_values("timestamp")
     return {c: g.reset_index(drop=True) for c, g in df.groupby("crew_id")}
+
+
+@st.cache_data(ttl=1800)
+def cached_nasa_sep_events(start_date, end_date):
+    return nasa_data.fetch_sep_events(start_date, end_date)
 
 
 CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv"))
@@ -788,8 +796,73 @@ def crew_chat():
             st.error("No se envió: " + err)
 
 
+def nasa_data_tab():
+    st.markdown('<div class="ttl" style="font-size:1.35rem">Datos espaciales y datasets NASA</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        "Los eventos DONKI aportan contexto de actividad solar; **no son mediciones de dosis de radiación "
+        "ni datos fisiológicos de la tripulación**."
+    )
+    days = st.selectbox("Consultar eventos SEP de los últimos", [7, 30], format_func=lambda n: f"{n} días",
+                        key="nasa_sep_days")
+    if st.button("Actualizar datos de NASA", key="nasa_sep_refresh"):
+        cached_nasa_sep_events.clear()
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days - 1)
+    st.caption(f"Fuente: NASA DONKI · SEP · {start_date.isoformat()} a {end_date.isoformat()}. "
+               + ("Usando NASA_API_KEY." if os.getenv("NASA_API_KEY") else
+                  "Sin NASA_API_KEY se usa DEMO_KEY, sujeta a límites de solicitudes."))
+    try:
+        events = cached_nasa_sep_events(start_date.isoformat(), end_date.isoformat())
+    except requests.RequestException:
+        st.error("No se pudo consultar NASA DONKI. Revisa la conexión y, si usas una, la variable NASA_API_KEY.")
+    except ValueError as exc:
+        st.error(f"La respuesta de NASA no tiene el formato esperado: {exc}")
+    else:
+        if events:
+            st.metric("Eventos de partículas solares", len(events))
+            st.dataframe(
+                pd.DataFrame(events),
+                column_config={"Ficha NASA": st.column_config.LinkColumn("Ficha NASA", display_text="Abrir")},
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.info("NASA DONKI no reporta eventos SEP en este intervalo.")
+
+    st.divider()
+    st.markdown('<div class="ttl" style="font-size:1.15rem">Importar un dataset OSDR / LSDA</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        "Descarga un archivo **CSV o TSV** de acceso abierto desde "
+        "[NASA OSDR](https://osdr.nasa.gov/bio/repo/data/studies/) o "
+        "[NASA Life Sciences Portal](https://nlsp.nasa.gov/explore) y cárgalo aquí. "
+        "No se admiten archivos ZIP."
+    )
+    uploaded = st.file_uploader("Dataset de referencia", type=["csv", "tsv", "txt"], key="nasa_dataset_upload")
+    if uploaded is not None:
+        if uploaded.size > 25 * 1024 * 1024:
+            st.error("El archivo supera el límite de 25 MB. Descarga una tabla más pequeña en CSV/TSV.")
+            return
+        try:
+            dataset = nasa_data.read_reference_dataset(uploaded)
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.caption(f"{uploaded.name} · {len(dataset):,} filas · {len(dataset.columns)} columnas")
+            st.dataframe(dataset.head(100), hide_index=True, width="stretch")
+            numeric_columns = dataset.select_dtypes(include=np.number).columns.tolist()
+            if numeric_columns:
+                with st.expander("Resumen estadístico de columnas numéricas"):
+                    st.dataframe(dataset[numeric_columns].describe().T, width="stretch")
+            st.info("Este dataset se muestra como referencia y no se mezcla con la telemetría ni altera las alertas.")
+
+
 tick()
-tab0, tabc, tab1, tab2 = st.tabs(["Centro de control", "Chat de tripulación", "Monitor de salud", "Luma, tu compañero"])
+tab0, tabc, tab1, tab2, tab_nasa = st.tabs(
+    ["Centro de control", "Chat de tripulación", "Monitor de salud", "Luma, tu compañero", "NASA y datasets"]
+)
 with tab0:
     control_center()
 with tabc:
@@ -798,3 +871,5 @@ with tab1:
     st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius, playing)
 with tab2:
     chat_tab()
+with tab_nasa:
+    nasa_data_tab()

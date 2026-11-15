@@ -12,6 +12,7 @@
 2. **Indicadores de riesgo:** cálculo de índices cardiovasculares, recuperación autonómica y riesgo ambiental a partir de las señales disponibles.
 3. **HUD de cámara:** detección de rostro y estimación experimental del pulso por rPPG con OpenCV.
 4. **Centro de control:** dashboard Streamlit para visualizar varios astronautas, dispositivos, gráficas e historial de alertas.
+5. **Datos NASA:** eventos de partículas solares de NASA DONKI y vista previa de datasets OSDR/LSDA cargados por el usuario.
 
 La mayor parte de la telemetría incluida es sintética. El proyecto no está validado clínicamente y no debe usarse para diagnóstico ni decisiones médicas.
 
@@ -100,13 +101,17 @@ Si nadie la cancela, avisa a los tripulantes dentro del radio configurado por re
 
 ---
 
-## 📊 Fuentes de referencia
+## 🪐 Integración de datos NASA
 
-- **[NASA Open Science Data Repository (OSDR)](https://science.nasa.gov/biological-physical/data/osdr/)**
-- **[NASA Life Sciences Portal (NLSP / LSDA)](https://www.nasa.gov/hrp/nlsp/)**
-- **[NASA Open APIs](https://api.nasa.gov/)**
+- **NASA Open APIs / DONKI SEP:** la pestaña **NASA y datasets** consulta eventos de partículas solares de los últimos 7 o 30 días.
+  Se puede definir `NASA_API_KEY` antes de iniciar Streamlit; si no, se usa `DEMO_KEY` con sus límites de solicitudes.
+- **OSDR y LSDA:** descarga un dataset de acceso abierto en formato CSV/TSV desde
+  [NASA OSDR](https://osdr.nasa.gov/bio/repo/data/studies/) o [NASA Life Sciences Portal](https://nlsp.nasa.gov/explore),
+  y cárgalo en la misma pestaña para ver sus columnas, una muestra y estadísticas numéricas. Se aceptan archivos de hasta 25 MB.
 
-Estas fuentes sirven como referencia; el proyecto no descarga ni integra sus datasets o APIs durante la ejecución. Los CSV incluidos son sintéticos.
+Los eventos DONKI son contexto de actividad solar, no mediciones de dosis de radiación ni de salud de la tripulación.
+Los datasets OSDR/LSDA se cargan localmente, se muestran como referencia y no se mezclan automáticamente con las alertas
+o los CSV sintéticos del monitor.
 
 ---
 
@@ -134,11 +139,12 @@ BioOrbit-UTH-HealthMonitor/
 │   ├── ble_watch.py, watch_connect.py   # Conexión BLE a relojes
 │   ├── companion.py, luma.py            # Luma, chat, bienestar y respiración guiada
 │   ├── luma_avatar.py                   # Avatar de Luma
+│   ├── nasa_data.py                     # API NASA DONKI y carga de datasets tabulares
 │   ├── alerts.py, alert_listener.py     # Alertas y receptor UDP
 │   ├── data_pipeline.py                 # Ingesta y cálculo de indicadores
 │   └── generate_demo_data.py            # Generador de telemetría sintética
 ├── crew_server/                         # Cuentas, chat, alertas y dashboard de teléfonos
-├── tests/                               # Pruebas de BLE, flota y enlace
+├── tests/                               # Pruebas de NASA, BLE, flota y enlace
 ├── wear-os-bridge/                      # App Wear OS (Kotlin) para transmitir pulso por BLE
 ├── docs/
 │   ├── fleet_api.md                     # API e integración de dispositivos
@@ -203,7 +209,19 @@ En un reloj Wear OS compatible, abre `wear-os-bridge/`, pulsa **Iniciar transmis
 barra lateral del dashboard, pulsa **Buscar relojes cercanos** y **Conectar reloj**. También puedes iniciar la conexión
 desde el HUD con la tecla **W**. Para probar sin hardware, selecciona **Demo reloj**.
 
-### 5. Habilitar dispositivos y teléfonos remotos (opcional)
+### 5. NASA DONKI y datasets (opcional)
+
+En la pestaña **NASA y datasets**, el dashboard consulta la API DONKI SEP automáticamente y permite cargar CSV/TSV
+descargados de OSDR o LSDA. Para usar una clave NASA personal, defínela en PowerShell **antes** de iniciar Streamlit:
+
+```powershell
+$env:NASA_API_KEY = "TU_CLAVE_NASA"
+python -m streamlit run src\app.py
+```
+
+Sin clave personal se usa `DEMO_KEY`. El archivo de referencia debe ser CSV/TSV y no superar 25 MB.
+
+### 6. Habilitar dispositivos y teléfonos remotos (opcional)
 
 Para reportes de otras laptops o dispositivos, inicia `fleet_server.py` en otra terminal:
 
@@ -221,7 +239,7 @@ python crew_server\server.py
 Consulta [`docs/fleet_api.md`](docs/fleet_api.md) y [`crew_server/README.md`](crew_server/README.md) para puertos,
 conexión por Wi-Fi y configuración opcional. No expongas los servidores a Internet sin protegerlos.
 
-### 6. Pipeline y pruebas
+### 7. Pipeline y pruebas
 
 ```powershell
 python src\data_pipeline.py data\sample_astronaut_telemetry.csv
