@@ -1,3 +1,4 @@
+
 # Dependencias de BioOrbit-UTH Health Monitor
 # NASA Space Apps Challenge 2026 - Reto: Create Health Monitoring Software for Astronauts on Space Missions
 numpy>=1.26.0
