@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070a1f">
+<title>BioOrbit</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">BioOrbit<span>UTH · Space Apps 2026</span></div>
+    <button id="crewChip" class="chip" style="--c:var(--ok)"><i></i><b id="crewTxt">ASTRO-02</b><em id="crewState">Estable</em></button>
+  </header>
+
+  <!-- Banner de emergencia (encima de todo) -->
+  <section id="emergency" class="emergency hidden" role="alert">
+    <div class="em-title" id="emTitle">No detecto signos vitales</div>
+    <div class="em-text" id="emText"></div>
+    <div class="em-actions">
+      <button id="btnOk" class="btn big ok">Estoy bien</button>
+    </div>
+    <ol id="emSteps" class="steps hidden"></ol>
+  </section>
+
+  <main>
+    <!-- ======================= MONITOR ======================= -->
+    <section id="view-monitor" class="view active">
+      <div class="stage glass">
+        <video id="cam" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div id="camOff" class="cam-off">
+          <p>La cámara mide tu pulso (rPPG) y fija tu rostro.</p>
+          <button id="btnCam" class="btn primary">Activar cámara</button>
+        </div>
+        <div class="stage-tag" id="faceTag">Cámara apagada</div>
+      </div>
+
+      <div class="row2">
+        <div class="card glass pulse">
+          <div class="ttl">Pulso óptico</div>
+          <div class="sub">rPPG experimental</div>
+          <div class="ring-wrap">
+            <svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="50" class="track"/><circle id="ringArc" cx="60" cy="60" r="50" class="arc"/></svg>
+            <div class="ring-val"><b id="bpmCam">—</b><span id="bpmCamLbl">sin rostro</span></div>
+          </div>
+          <div class="kv"><span>Estabilidad</span><b id="stab">—</b></div>
+          <div class="bar"><i id="qBar"></i></div>
+        </div>
+        <div class="card glass luma-mini" id="lumaCard">
+          <canvas id="lumaSmall"></canvas>
+          <div class="ttl"><span class="luma-name">Luma</span> <small id="lumaMood">reposo</small></div>
+          <p id="lumaMsg" class="luma-msg">Hola, soy Luma.</p>
+        </div>
+      </div>
+
+      <div class="card glass watch">
+        <div class="row-between">
+          <div><div class="ttl">Reloj inteligente</div><div class="sub" id="watchSub">Sin reloj · Bluetooth</div></div>
+          <div class="watch-bpm"><b id="watchBpm">—</b><span>bpm</span></div>
+        </div>
+        <div class="btns">
+          <button id="btnWatch" class="btn primary">Conectar reloj</button>
+          <button id="btnWatchDemo" class="btn">Demo</button>
+        </div>
+        <ul id="watchList" class="devlist hidden"></ul>
+        <div class="hint" id="watchHint">Abre BioOrbit Watch Bridge en el reloj y pulsa «Iniciar transmisión».</div>
+      </div>
+
+      <div class="card glass">
+        <div class="row-between">
+          <div><div class="ttl">Telemetría</div><div class="sub" id="telSub">simulada</div></div>
+          <button id="btnPlay" class="btn small">Pausa</button>
+        </div>
+        <div class="grid" id="telGrid"></div>
+      </div>
+
+      <div class="card glass demo">
+        <div class="ttl">Demostración</div>
+        <div class="btns">
+          <button id="btnLoss" class="btn danger">Simular pérdida de signos</button>
+          <button id="btnReset" class="btn">Restablecer</button>
+        </div>
+        <label class="kv"><span>Este teléfono es de</span>
+          <select id="crewSel"></select></label>
+        <label class="kv"><span>Radio de aviso <b id="radTxt">20 m</b></span>
+          <input id="radius" type="range" min="5" max="60" value="20"></label>
+        <label class="kv sw"><span>Alertar si no hay nadie en cámara</span><input id="optAbsence" type="checkbox" checked></label>
+        <label class="kv"><span>Avisar después de</span>
+          <select id="optAbsSec"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="30">30 s</option><option value="60">1 min</option></select></label>
+        <label class="kv sw"><span>Voz de Luma</span><input id="optVoice" type="checkbox" checked></label>
+        <label class="kv sw"><span>Responder alertas con la voz <small>("estoy bien")</small></span><input id="optVoiceAck" type="checkbox" checked></label>
+        <label class="kv sw"><span>Escucha permanente</span><input id="optListen" type="checkbox" checked></label>
+        <label class="kv sw"><span>Responder a todo lo que escuche <small>(si lo apagas, di «Luma…» para hablarle)</small></span><input id="optReplyAll" type="checkbox" checked></label>
+        <label class="kv sw"><span>SOS por voz <small>(«ayuda», «auxilio», «socorro»)</small></span><input id="optSos" type="checkbox" checked></label>
+        <label class="kv sw"><span>Canciones y artistas en Spotify <small>(si está instalado; si no, YouTube Music o la música del teléfono)</small></span><input id="optSpotify" type="checkbox" checked></label>
+        <label class="kv sw"><span>Seguir en segundo plano <small>(con la app minimizada Luma te sigue escuchando y la música sigue sonando)</small></span><input id="optBg" type="checkbox" checked></label>
+        <div class="btns"><button id="btnBattery" class="btn">Quitar límite de batería</button></div>
+        <div class="perf" id="bgTxt"></div>
+        <p class="hint">La vigilancia «nadie en cámara» necesita la app abierta en pantalla: al minimizarla se pausa la cámara, pero siguen el micrófono, el SOS por voz, el reloj y la música.</p>
+        <div class="ttl" style="margin-top:14px">Diagnóstico de voz</div>
+        <div id="voiceDiag" class="diag"></div>
+        <div class="btns"><button id="btnTestVoice" class="btn">Probar voz de Luma</button></div>
+        <label class="kv sw"><span>Usar reconocimiento en línea <small>(si el del teléfono no te entiende)</small></span><input id="optOnline" type="checkbox"></label>
+        <div class="perf" id="perfTxt">Rendimiento: cámara apagada</div>
+        <p class="hint">Prototipo educativo con telemetría simulada. No es un dispositivo médico.</p>
+      </div>
+    </section>
+
+    <!-- ======================= LUMA ======================= -->
+    <section id="view-luma" class="view">
+      <div class="card glass luma-hero">
+        <canvas id="lumaBig"></canvas>
+        <div class="ttl center"><span class="luma-name">Luma</span> · <span id="lumaMood2">reposo</span></div>
+        <div class="sub center" id="lumaState">estable</div>
+        <div class="btns">
+          <button id="btnBreath" class="btn">Respiración guiada</button>
+          <button id="btnSupport" class="btn danger hidden">Pedir apoyo humano</button>
+        </div>
+      </div>
+      <div id="escalate" class="banner warn hidden"><b>Conviene avisar al cirujano de vuelo o al comandante.</b> Por tu check-in y tus señales, lo mejor es que alguien te acompañe. No es un diagnóstico.</div>
+      <div class="card glass chat">
+        <div id="chatLog" class="chat-log"></div>
+        <div class="chips" id="quick"></div>
+        <form id="chatForm" class="chat-in">
+          <button type="button" id="btnMic" class="btn mic" aria-label="Hablar con Luma"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z"/></svg><i id="micLevel"></i></button>
+          <input id="chatTxt" autocomplete="off" placeholder="Escribe o toca el micrófono…">
+          <button class="btn primary" aria-label="Enviar">➤</button>
+        </form>
+        <label class="kv sw"><span>Modo conversación <small>(Luma te escucha después de responder)</small></span><input id="optConvo" type="checkbox"></label>
+      </div>
+      <div class="card glass ai">
+        <div class="row-between">
+          <div><div class="ttl">Inteligencia artificial</div><div class="sub" id="aiSub">Respuestas básicas (sin IA)</div></div>
+          <span id="aiDot" class="ai-dot"></span>
+        </div>
+        <div id="aiForm">
+          <p class="hint">Con una clave de API de <b>Gemini</b> (Google AI Studio) o de <b>Claude</b> (Anthropic), Luma conversa de verdad. Se envían tus mensajes y un resumen de tus señales a ese servicio. La clave se guarda solo en este teléfono. Sin clave o sin internet, Luma usa sus respuestas básicas.</p>
+          <div class="chat-in">
+            <input id="aiKey" type="password" autocomplete="off" placeholder="Pega tu clave (AQ.… / AIza… / sk-ant-…)">
+            <button type="button" id="btnAiSave" class="btn primary">Guardar</button>
+          </div>
+        </div>
+        <button type="button" id="btnAiClear" class="btn small hidden">Quitar clave</button>
+      </div>
+      <div class="card glass">
+        <div class="ttl">Check-in de bienestar (WHO-5)</div>
+        <div class="sub" id="whoLast">Últimas dos semanas · 5 preguntas de la OMS</div>
+        <button id="btnWho" class="btn">Hacer check-in</button>
+        <form id="whoForm" class="who hidden"></form>
+      </div>
+      <p class="hint pad">Luma es un acompañante: no diagnostica ni sustituye a la tripulación ni al equipo médico.</p>
+    </section>
+
+    <!-- ======================= EQUIPO (tripulación y chat) ======================= -->
+    <section id="view-crew" class="view">
+      <div id="crewOut" class="card glass">
+        <div class="ttl">Tripulación</div>
+        <p class="sub">Inicia sesión con tu cuenta de astronauta para ver a los demás, chatear y que el control de misión vea tu estado.</p>
+        <div class="btns"><button id="btnLogin" class="btn primary">Iniciar sesión o crear cuenta</button></div>
+      </div>
+      <div id="crewIn" class="hidden">
+        <div class="card glass">
+          <div class="row-between">
+            <div><div class="ttl" id="meName">Tripulación</div><div class="sub" id="srvSub">Conectando…</div></div>
+            <span id="srvDot" class="ai-dot"></span>
+          </div>
+          <div id="crewList" class="crew-list"></div>
+        </div>
+        <div id="crewAlerts"></div>
+        <div class="card glass chat">
+          <div id="crewChans" class="chans"></div>
+          <div id="crewLog" class="chat-log"></div>
+          <form id="crewForm" class="chat-in">
+            <input id="crewMsg" autocomplete="off" maxlength="1000" placeholder="Mensaje para toda la tripulación…">
+            <button class="btn primary" aria-label="Enviar">➤</button>
+          </form>
+          <p class="hint">También por voz: «dile a Ana que ya voy», «manda un mensaje a la tripulación: junta a las 5», «¿tengo mensajes?».</p>
+        </div>
+        <div class="card glass">
+          <div class="ttl">Cuenta y servidor</div>
+          <div class="kv"><span>Servidor</span><b id="srvUrl" class="srv-url">—</b></div>
+          <label class="kv sw"><span>Leer mensajes en voz alta</span><input id="optReadMsgs" type="checkbox" checked></label>
+          <div class="btns"><button id="btnSrv" class="btn">Cambiar servidor</button><button id="btnLogout" class="btn danger">Cerrar sesión</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= ALERTAS ======================= -->
+    <section id="view-alerts" class="view">
+      <div class="card glass">
+        <div class="ttl">Alertas recibidas</div>
+        <div class="sub">Avisos de otros teléfonos o laptops BioOrbit en la misma red Wi-Fi.</div>
+        <ul id="rxList" class="alist"><li class="empty">Sin alertas.</li></ul>
+      </div>
+      <div class="card glass">
+        <div class="ttl">Alertas enviadas</div>
+        <ul id="txList" class="alist"><li class="empty">Sin alertas.</li></ul>
+      </div>
+      <div class="card glass">
+        <div class="ttl">Si recibes una alerta</div>
+        <ol class="steps" id="stepsStatic"></ol>
+      </div>
+    </section>
+  </main>
+
+  <!-- Parte inferior fija: botones de pestañas y, debajo, la barra de audio -->
+  <div class="dock">
+    <nav class="tabs">
+      <button data-view="monitor" class="active"><span>◉</span>Monitor</button>
+      <button data-view="luma"><span>☺</span>Luma</button>
+      <button data-view="crew"><span>👥</span>Equipo<i id="crewDot" class="dot hidden"></i></button>
+      <button data-view="alerts"><span>⚠</span>Alertas<i id="rxDot" class="dot hidden"></i></button>
+    </nav>
+    <!-- Música que está sonando (aparece solo cuando hay música) -->
+    <section id="music" class="music hidden">
+      <span class="mu-ic">♪</span>
+      <div class="mu-info"><b id="muTitle">Música</b><span id="muSub"></span></div>
+      <button id="muPlay" class="mu-btn" aria-label="Pausar">⏸</button>
+      <button id="muNext" class="mu-btn" aria-label="Siguiente">⏭</button>
+      <button id="muStop" class="mu-btn" aria-label="Quitar música">■</button>
+    </section>
+    <!-- Escucha permanente: gráfica del sonido que capta el micrófono -->
+    <section id="ear" class="ear off">
+      <canvas id="earGraph"></canvas>
+      <div class="ear-info"><b id="earState">Micrófono apagado</b><span id="earText"></span></div>
+      <button id="btnEar" class="ear-btn" aria-label="Escucha permanente"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z"/></svg></button>
+    </section>
+  </div>
+
+  <div id="breath" class="breath-ov hidden">
+    <div class="breath-c"><div id="breathCircle"></div><b id="breathTxt">Inhala</b></div>
+    <button id="btnBreathEnd" class="btn">Terminar</button>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Inicio de sesión de astronautas -->
+  <div id="auth" class="auth hidden">
+    <form id="authForm" class="auth-box glass" autocomplete="on">
+      <div class="brand">BioOrbit<span>Tripulación · inicia sesión</span></div>
+      <div class="seg"><button type="button" id="authIn" class="on">Entrar</button><button type="button" id="authUp">Crear cuenta</button></div>
+      <label class="fld"><span>Servidor</span><input id="aSrv" inputmode="url" autocapitalize="none" spellcheck="false" placeholder="http://192.168.1.10:8765 o https://…"></label>
+      <div class="sub" id="aSrvState"></div>
+      <div id="aUpOnly" class="hidden">
+        <label class="fld"><span>Tu nombre</span><input id="aName" maxlength="60" autocomplete="name" placeholder="Ana López"></label>
+        <label class="fld"><span>Puesto en la misión</span><select id="aSlot"></select></label>
+      </div>
+      <label class="fld"><span>Usuario</span><input id="aUser" maxlength="32" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="ana"></label>
+      <label class="fld"><span>Contraseña</span><input id="aPass" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></label>
+      <div class="err" id="aErr"></div>
+      <button id="aGo" class="btn primary big">Entrar</button>
+      <button type="button" id="aSkip" class="btn">Usar sin cuenta (solo este teléfono)</button>
+    </form>
+  </div>
+</div>
+<script src="vendor/face-api.js"></script>
+<script src="luma.js"></script>
+<script src="native.js"></script>
+<script src="app.js"></script>
+<script src="crew.js"></script>
+</body>
+</html>

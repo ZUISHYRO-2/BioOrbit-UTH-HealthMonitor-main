@@ -53,6 +53,21 @@ comparativas, tabla de dispositivos con su estado (en línea / retrasado / sin s
 pérdida de signos vitales ahora se vigilan para **todos** los astronautas, no solo el que estás monitoreando.
 Los teléfonos se enlazan con `python crew_server/server.py` y otras laptops con `python src/fleet_server.py`; detalles en [`docs/fleet_api.md`](docs/fleet_api.md).
 
+La consola y los teléfonos están **enlazados en los dos sentidos**: la consola ve el estado y las alertas de cada teléfono,
+y en la pestaña **Chat de tripulación** el control de misión escribe a todos o en privado. Las alertas que detecta la consola
+(pérdida de signos, apoyo humano) llegan también a los teléfonos y se cierran solas cuando vuelven las señales.
+
+## 📱 App para teléfono y servidor de tripulación (nuevo)
+
+- **App Android** (`android-app/`): Luma por voz (escucha permanente, IA opcional con tu propia clave), cámara con pulso y
+  alerta «nadie en cámara», reloj por Bluetooth, SOS por voz, música por voz y funcionamiento en segundo plano.
+- **Cuentas de astronauta:** cada quien inicia sesión en su teléfono (mientras está el login, todo lo demás queda apagado).
+- **Pestaña Equipo:** quién está en línea, su pulso y alertas («Voy en camino»), chat general, privado y con Control.
+  Por voz: «dile a Ana que ya voy», «¿tengo mensajes?».
+- **Servidor de tripulación** (`crew_server/`): guarda cuentas y chat, y sirve un **dashboard web** en `http://localhost:8765`
+  con tarjetas por astronauta, **Dispositivos conectados**, alertas y chat. En el mismo Wi-Fi los teléfonos lo encuentran solos;
+  con datos móviles se usa un túnel https (`crew_server/tunel.py`). Detalles en [`crew_server/README.md`](crew_server/README.md).
+
 ## ⌚ Reloj inteligente por Bluetooth (nuevo)
 
 La frecuencia cardíaca puede venir de un **reloj real** en lugar del CSV simulado:
@@ -117,7 +132,7 @@ El proyecto sigue las directrices técnicas de ingeniería y digitalización de 
 BioOrbit-UTH-HealthMonitor/
 ├── .streamlit/config.toml               # Tema oscuro de la consola
 ├── data/
-│   ├── demo_stress_arc.csv              # Escenario simulado para el demo (ASTRO-02 se desgasta)
+│   ├── demo_stress_arc.csv              # Escenario simulado para el demo (4 astronautas; ASTRO-02 se desgasta)
 │   └── sample_astronaut_telemetry.csv   # Telemetría simulada (4 tripulantes)
 ├── src/
 │   ├── app.py                           # Consola de cabina (Streamlit) + Luma + WHO-5
@@ -129,10 +144,16 @@ BioOrbit-UTH-HealthMonitor/
 │   ├── ble_watch.py                     # Reloj por Bluetooth LE: escaneo, conexión, pulso, HRV
 │   ├── watch_connect.py                 # Conectar el reloj desde la terminal
 │   ├── data_pipeline.py                 # Pipeline de ingesta, HRV, alertas y dosis de radiación
-│   └── generate_demo_data.py            # Genera demo_stress_arc.csv
-├── tests/test_ble_watch.py              # Pruebas del conector del reloj
+│   ├── generate_demo_data.py            # Genera demo_stress_arc.csv
+│   ├── crew_link.py                     # Enlace consola <-> teléfonos (estado, alertas, chat)
+│   ├── fleet.py / fleet_server.py       # Dispositivos: reloj, HUD de otras laptops (puerto 8766)
+│   └── luma_avatar.py                   # Avatar de Luma
+├── crew_server/                         # Servidor de tripulación: cuentas, chat, alertas, dashboard web (8765)
+├── android-app/                         # App del teléfono (APK): Luma, cámara, reloj, alertas, pestaña Equipo
+├── tests/                               # Pruebas: reloj, dispositivos, enlace con teléfonos
 ├── wear-os-bridge/                      # App para el reloj (Kotlin): transmite el pulso por BLE
 ├── docs/
+│   ├── fleet_api.md                     # Cómo se conecta cada dispositivo
 │   ├── pitch_script_30s.md              # Guion de pitch de 30 segundos en inglés
 │   └── vista_previa_hud.png             # Captura del HUD
 ├── requirements.txt
@@ -181,6 +202,21 @@ radiación, HRV y sueño son telemetría simulada del CSV y el HUD lo indica.
 streamlit run src/app.py
 ```
 Se pueden correr los dos a la vez: la consola muestra en la barra lateral si el HUD está conectado y el pulso que mide la cámara.
+
+### 5. Teléfonos de la tripulación
+```bash
+python crew_server/server.py          # en otra terminal; la primera vez crea la contraseña de «control»
+```
+1. Instala el APK de `android-app/` en cada teléfono (Android Studio → Build → Generate APKs).
+2. En la app: **Crear cuenta** (nombre, puesto ASTRO-01…04, usuario y contraseña). En el mismo Wi-Fi el servidor aparece solo.
+3. La consola (`streamlit run src/app.py`) entra sola como «control»: tarjetas de cada teléfono en **Centro de control** y
+   chat en **Chat de tripulación**. También está el dashboard web en `http://localhost:8765`.
+4. Windows Firewall: permite Python en **redes privadas**, si no, los teléfonos no se conectan.
+
+### 6. Pruebas
+```bash
+python -m pytest tests -q
+```
 
 ---
 

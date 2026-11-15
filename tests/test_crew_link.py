@@ -115,3 +115,90 @@ def test_password_desde_archivo(tmp_path, monkeypatch):
     f.write_text("Usuario: control\nContraseña: abc123\n(otra línea)\n", encoding="utf-8")
     monkeypatch.setattr(crew_link, "PASS_FILE", f)
     assert crew_link.read_password() == "abc123"
+
+
+# ------------------------------------------------------------------ consola -> teléfonos
+def wait_for(cond, s=3.0):
+    t = time.time() + s
+    while time.time() < t:
+        if cond():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_chat_en_los_dos_sentidos(crew_server, monkeypatch):
+    monkeypatch.setenv("BIOORBIT_CONTROL_PASSWORD", "clave-de-prueba")
+    tok = phone(crew_server, "ana", "ASTRO-02", {"hr": 70})
+    post(crew_server, "/api/chat", {"text": "Hola control"}, tok)
+    link = crew_link.CrewLink(crew_server)
+    link.poll_once(CREW)
+    assert [m["text"] for m in link.messages()] == ["Hola control"]
+    assert link.accounts()[0]["name"] == "Ana" and link.accounts()[0]["online"]
+    # el control contesta a todos y en privado
+    assert link.send_chat("Revisión a las 18:00") == (True, "")
+    assert link.send_chat("Ana, ¿todo bien?", "ana")[0]
+    assert link.send_chat("   ")[0] is False
+    ok, err = link.send_chat("hola", "nadie")
+    assert not ok and "no existe" in err
+    got = post(crew_server, "/api/sync", {"since_msg": 0}, tok)["messages"]
+    assert [(m["from"], m["to"], m["text"]) for m in got] == [
+        ("ana", "", "Hola control"), ("control", "", "Revisión a las 18:00"), ("control", "ana", "Ana, ¿todo bien?")]
+    link.poll_once(CREW)                   # sin duplicados
+    assert len(link.messages()) == 3
+
+
+def test_alerta_de_la_consola_llega_y_se_cierra(crew_server, monkeypatch):
+    monkeypatch.setenv("BIOORBIT_CONTROL_PASSWORD", "clave-de-prueba")
+    tok = phone(crew_server, "ana", "ASTRO-02", {"hr": 70})
+    link = crew_link.CrewLink(crew_server)
+    link.poll_once(CREW)
+    link.send_alert("NO_VITALS", "ASTRO-01 (Hábitat): SIN SIGNOS VITALES.", key="ASTRO-01")
+    assert wait_for(lambda: link.has_open_key("ASTRO-01"))
+    al = post(crew_server, "/api/sync", {}, tok)["alerts"]
+    assert [(a["kind"], a["username"], a["resolved"]) for a in al] == [("NO_VITALS", "control", None)]
+    # «Enterado» de la consola en la alerta de un teléfono
+    post(crew_server, "/api/alert", {"kind": "SOS", "message": "Ana pidió ayuda"}, tok)
+    link.poll_once(CREW)
+    sos = next(a for a in link.open_alerts() if a["kind"] == "SOS")
+    assert link.ack(sos["id"])
+    acks = next(a for a in post(crew_server, "/api/sync", {}, tok)["alerts"] if a["kind"] == "SOS")["acks"]
+    assert acks[0]["username"] == "control" and acks[0]["text"] == "Control enterado"
+    # volvieron las señales de ASTRO-01: se cierra sola en los teléfonos
+    link.resolve_key("ASTRO-01")
+    assert wait_for(lambda: all(a["resolved"] for a in post(crew_server, "/api/sync", {}, tok)["alerts"]
+                                if a["kind"] == "NO_VITALS"))
+    assert not link.has_open_key("ASTRO-01")
+
+
+def test_sin_servidor_no_truena(monkeypatch):
+    monkeypatch.setenv("BIOORBIT_CONTROL_PASSWORD", "x")
+    down = crew_link.CrewLink("http://127.0.0.1:1")
+    ok, err = down.send_chat("hola")
+    assert not ok and "conexión" in err
+    down.send_alert("NO_VITALS", "x", key="ASTRO-01")    # no lanza nada
+    assert not down.ack(1)
+
+
+def test_dispositivos_conectados(crew_server):
+    tok = phone(crew_server, "ana", "ASTRO-02", {"hr": 70, "cam": True})
+    post(crew_server, "/api/sync", {"status": {"hr": 72}, "device": "tablet-ana"}, tok)   # 2.º equipo, misma cuenta
+    ctl = post(crew_server, "/api/login", {"username": "control", "password": "clave-de-prueba"})["token"]
+    devs = post(crew_server, "/api/sync", {}, ctl)["devices"]
+    assert sorted(d["device"] for d in devs) == ["Pixel", "tablet-ana"]
+    assert all(d["online"] and d["name"] == "Ana" and d["callsign"] == "ASTRO-02" for d in devs)
+    assert post(crew_server, "/api/sync", {}, tok)["devices"] == []        # solo el control ve la lista
+    post(crew_server, "/api/remove_user", {"username": "ana"}, ctl)
+    assert post(crew_server, "/api/sync", {}, ctl)["devices"] == []
+
+
+def test_consola_se_recupera_si_cambia_la_base(crew_server, monkeypatch):
+    monkeypatch.setenv("BIOORBIT_CONTROL_PASSWORD", "clave-de-prueba")
+    tok = phone(crew_server, "ana", "ASTRO-02", {"hr": 70})
+    link = crew_link.CrewLink(crew_server)
+    link._since, link._msgs = 40, [{"id": 1, "ts": 1, "from": "x", "to": "", "text": "viejo"}]   # caché de otra base
+    post(crew_server, "/api/chat", {"text": "nuevo"}, tok)
+    link.poll_once(CREW)
+    assert [m["text"] for m in link.messages()] == ["nuevo"]
+    r = post(crew_server, "/api/sync", {}, tok)
+    assert r["server_id"] and r["last_msg_id"] == 1

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- http (sin cifrar) permitido porque el servidor de tripulación en la red local (http://192.168.x.x:8765)
+     y algunas radios de SomaFM no tienen https. Por datos móviles se usa el túnel https. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

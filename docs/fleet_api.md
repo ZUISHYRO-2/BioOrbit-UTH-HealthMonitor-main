@@ -81,6 +81,16 @@ streamlit run src/app.py            # terminal 2
 - Si no aparecen teléfonos, el renglón verde/naranja arriba de las tarjetas dice el motivo (servidor apagado,
   contraseña, etc.).
 
+### El enlace va en los dos sentidos
+
+| De los teléfonos a la consola | De la consola a los teléfonos |
+|---|---|
+| Estado de cada teléfono (pulso, cámara, reloj, app minimizada) | Mensajes del control (pestaña **Chat de tripulación**): a todos o privados |
+| Alertas (SOS, sin signos, nadie en cámara, apoyo humano) | «Enterado» y «Marcar resuelta» en esas alertas |
+| Chat de la tripulación (también los privados) | Pérdida de signos o apoyo humano que detecta la consola: llegan como alerta al teléfono (con datos móviles también) y se cierran solas cuando vuelven las señales o alguien toca «estoy bien» |
+
+En el teléfono, los mensajes del control salen como «Control de misión» en la pestaña **Equipo** y Luma los lee en voz alta.
+
 ## Puertos
 
 | Puerto | Qué es |

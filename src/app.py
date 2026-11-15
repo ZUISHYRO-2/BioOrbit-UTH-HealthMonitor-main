@@ -90,6 +90,12 @@ button[kind="primary"]{background:linear-gradient(90deg,#38e1ff,#8b7cff)!importa
 .fgrid .vl span{font-size:.65rem;color:var(--mut);margin-left:3px;font-weight:400}
 .badge{display:inline-block;font-size:.74rem;padding:2px 9px;border-radius:999px;border:1px solid var(--c);color:var(--c);margin:2px 4px 0 0}
 .fmeta{color:var(--mut);font-size:.78rem;margin-top:6px}
+.clog{display:flex;flex-direction:column;gap:8px;max-height:520px;overflow-y:auto;padding:6px 2px}
+.cm{max-width:78%;padding:9px 13px;border-radius:14px;background:#38e1ff12;border:1px solid #38e1ff33;align-self:flex-start;white-space:pre-wrap}
+.cm.me{align-self:flex-end;background:#8b7cff2e;border-color:#8b7cff66}
+.cm.dm{border-style:dashed}
+.cm small{display:block;font-size:.72rem;color:var(--mut);margin-bottom:2px}
+.cm small b{color:var(--cy);font-weight:600}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 """,
@@ -266,6 +272,7 @@ def tick(force=False):
         return
     ss.last_tick = now
     devs = fleet.snapshot(ss.get("watch_crew"), now)
+    link = crew_link.get_link()
     for c in all_crew():
         df = data.get(c)
         n = ss.idx.get(c, 0)
@@ -291,11 +298,21 @@ def tick(force=False):
             status = alerts.vitals_status(row)
         if alerts.step(em, status, now) == "DUE":
             ss.log.insert(0, alerts.broadcast("NO_VITALS", c, ss.radius))
+            share_alert(ss.log[0])
             em.phase = "SENT"
+        if em.phase == "OK" and link.has_open_key(c):
+            link.resolve_key(c)                # volvieron las señales o «estoy bien»: se cierra en los teléfonos
         ss.cur[c] = dict(n=n, i=i, row=row, status=status, watch=wstate, watch_data=wdata)
         if ss.playing and df is not None:
             ss.idx[c] = n + 1
     ss.devs = devs
+
+
+def share_alert(rec):
+    """Además de la red local (UDP), manda la alerta a los teléfonos por el servidor de tripulación
+    (así llega también a quien está con datos móviles)."""
+    crew_link.get_link().send_alert(rec["kind"], rec["message"], key=rec["crew"] if rec["kind"] == "NO_VITALS" else None)
+    rec.setdefault("channels", []).append(("Servidor de tripulación", "enviado"))
 
 
 def last_alert(crew):
@@ -441,6 +458,7 @@ def chat_tab():
         if ss.crisis.get(who) or escalate:
             if st.button("Pedir apoyo humano ahora", type="primary", width="stretch"):
                 res = alerts.broadcast("SUPPORT", who, radius)
+                share_alert(res)
                 ss.log.insert(0, res)
                 names = ", ".join(c for c, _, _ in res["notified"]) or "nadie dentro del radio"
                 st.success(f"Aviso enviado. Avisados: {names}.")
@@ -639,7 +657,12 @@ def control_center():
         st.markdown(f'<div class="banner sos"><b>📲 {escape(str(a_.get("kind", "ALERTA")))}</b> · '
                     f'{escape(str(a_.get("message", "")))}' + (f'<br><small>{acks}</small>' if acks else "") + '</div>',
                     unsafe_allow_html=True)
-        if st.button("Marcar resuelta", key=f"cc_res_{a_['id']}"):
+        b1, b2, _ = st.columns([1, 1, 3])
+        mine = any(k.get("username") == "control" for k in a_.get("acks", []))
+        if not mine and b1.button("Enterado", key=f"cc_ack_srv_{a_['id']}", width="stretch"):
+            crew_link.get_link().ack(a_["id"])
+            st.rerun(scope="fragment")
+        if b2.button("Marcar resuelta", key=f"cc_res_{a_['id']}", width="stretch"):
             crew_link.get_link().resolve(a_["id"])
             st.rerun(scope="fragment")
 
@@ -687,7 +710,10 @@ def control_center():
             "1. En otra terminal con el venv activo: `python crew_server/server.py` (puerto 8765).\n"
             f"2. Cada astronauta abre la app en el mismo Wi-Fi, crea su cuenta y elige su puesto (ASTRO-01 a 04). "
             f"Si no encuentra el servidor, escribe `{ip}:8765`.\n"
-            "3. Esta consola entra sola como «control» y muestra los teléfonos en cuanto sincronizan.\n\n"
+            "3. Esta consola entra sola como «control» y muestra los teléfonos en cuanto sincronizan.\n"
+            "4. Datos móviles: `py crew_server/tunel.py` (Cloudflare). "
+            + (f"Dirección actual: `{crew_link.get_link().public_url()}`." if crew_link.get_link().public_url()
+               else "Los teléfonos aprenden la dirección solos.") + "\n\n"
             "**Otra laptop con el HUD de cámara:**\n\n"
             f"1. Aquí: `python src/fleet_server.py` (puerto {fleet.PORT}).\n"
             f"2. En la otra laptop: `$env:BIOORBIT_FLEET_URL=\"http://{ip}:{fleet.PORT}\"` y luego el HUD.")
@@ -703,10 +729,71 @@ def control_center():
             st.caption("Sin avisos todavía.")
 
 
+# ---------------------------------------------------------------- chat con la tripulación (app del teléfono)
+def chat_label(u, accounts):
+    if not u:
+        return "Toda la tripulación"
+    if u == "control":
+        return "Control"
+    a = next((x for x in accounts if x["username"] == u), None)
+    return f"{a['name']} ({a['callsign']})" if a else u
+
+
+@st.fragment(run_every=2.0)
+def crew_chat_log(chan):
+    link = crew_link.get_link()
+    state, msg = link.status()
+    accounts = link.accounts()
+    msgs = [m for m in link.messages()
+            if (not chan and not m.get("to")) or (chan and m.get("to") and chan in (m.get("from"), m.get("to")))]
+    if state != "ok":
+        st.caption("🟠 " + msg)
+    online = [a for a in accounts if a["online"]]
+    st.caption(f"{len(online)} de {len(accounts)} astronautas en línea · "
+               + (", ".join(f"{a['name']} ({a['callsign']})" for a in online) or "nadie conectado"))
+    parts = []
+    for m in msgs[-120:]:
+        me, dm = m.get("from") == "control", bool(m.get("to"))
+        when = datetime.fromtimestamp(float(m.get("ts", 0))).strftime("%H:%M")
+        head = f"<b>{escape(chat_label(m.get('from'), accounts))}</b>" + (
+            f" → {escape(chat_label(m.get('to'), accounts))}" if dm else "") + f" · {when}"
+        parts.append(f'<div class="cm{" me" if me else ""}{" dm" if dm else ""}"><small>{head}</small>'
+                     f'{escape(str(m.get("text", "")))}</div>')
+    if not parts:
+        parts.append('<div class="sub">Sin mensajes todavía.</div>')
+    # lo más nuevo abajo: se invierte el orden visual para que la caja quede pegada al final
+    st.markdown('<div class="clog" style="flex-direction:column-reverse"><div style="display:flex;flex-direction:column;gap:8px">'
+                + "".join(parts) + "</div></div>", unsafe_allow_html=True)
+
+
+def crew_chat():
+    link = crew_link.get_link()
+    accounts = link.accounts()
+    st.markdown('<div class="ttl" style="font-size:1.25rem">Chat con la tripulación</div>'
+                '<div class="sub">Los mismos mensajes que ven los astronautas en la pestaña «Equipo» de la app. '
+                'Luma los lee en voz alta en el teléfono.</div>', unsafe_allow_html=True)
+    options = [""] + [a["username"] for a in accounts]
+    chan = st.radio("Conversación", options, horizontal=True, key="crew_chan",
+                    format_func=lambda u: "💬 Toda la tripulación" if not u else "✉ " + chat_label(u, accounts))
+    crew_chat_log(chan)
+    with st.form("crew_chat_form", clear_on_submit=True, border=False):
+        a, b = st.columns([6, 1])
+        txt = a.text_input("Mensaje", label_visibility="collapsed",
+                           placeholder="Mensaje para toda la tripulación…" if not chan else
+                           f"Mensaje privado para {chat_label(chan, accounts)}…")
+        sent = b.form_submit_button("Enviar", type="primary", width="stretch")
+    if sent and txt.strip():
+        ok, err = link.send_chat(txt, chan)
+        if not ok:
+            st.error("No se envió: " + err)
+
+
 tick()
-tab0, tab1, tab2 = st.tabs(["Centro de control", "Monitor de salud", "Luma, tu compañero"])
+tab0, tabc, tab1, tab2 = st.tabs(["Centro de control", "Chat de tripulación", "Monitor de salud", "Luma, tu compañero"])
 with tab0:
     control_center()
+with tabc:
+    crew_chat()
 with tab1:
     st.fragment(monitor, run_every=1.0 if playing else None)(crew, radius, playing)
 with tab2:

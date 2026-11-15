@@ -32,6 +32,7 @@ from PIL import Image, ImageDraw, ImageFont
 import alerts
 import ble_watch
 import companion
+import fleet
 from data_pipeline import calculate_health_scores, load_telemetry
 from luma import LumaSprite, pick_mood
 
@@ -524,6 +525,11 @@ class State:
             crew=self.crew, face_locked=self.face is not None,
             bpm=round(self.bpm, 1) if self.bpm else None, quality=round(self.q, 1),
             stability=self.stability()[0], mood=self.mood, level=self.physio["level"], watch=self.watch)
+        # Si defines BIOORBIT_FLEET_URL, esta laptop también se reporta al centro de control (otra laptop).
+        fleet.push_from_env({
+            "device_id": f"hud-{self.crew}", "crew": self.crew, "kind": "camera", "name": f"HUD {self.crew}",
+            "heart_rate_bpm": round(self.bpm, 1) if self.bpm else None,
+            "face_locked": self.face is not None, "quality": round(self.q, 1)})
 
 
 # ------------------------------------------------------------------ dibujo

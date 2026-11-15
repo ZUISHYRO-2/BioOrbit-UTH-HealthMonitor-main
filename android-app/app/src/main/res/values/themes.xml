@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bio_bg">#070A1F</color>
+    <color name="bio_icon_bg">#0B1030</color>
+    <style name="Theme.BioOrbit" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bio_bg</item>
+        <item name="android:colorAccent">#38E1FF</item>
+        <item name="android:statusBarColor">@color/bio_bg</item>
+        <item name="android:navigationBarColor">@color/bio_bg</item>
+    </style>
+</resources>

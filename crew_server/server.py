@@ -61,9 +61,9 @@ def db() -> sqlite3.Connection:
             CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS status(
               username TEXT PRIMARY KEY, data TEXT NOT NULL, updated REAL NOT NULL, device TEXT, ip TEXT);
+            CREATE TABLE IF NOT EXISTS hr_hist(username TEXT, ts REAL, hr REAL);
             CREATE TABLE IF NOT EXISTS devices(
               device TEXT PRIMARY KEY, username TEXT NOT NULL, data TEXT NOT NULL, updated REAL NOT NULL, ip TEXT);
-            CREATE TABLE IF NOT EXISTS hr_hist(username TEXT, ts REAL, hr REAL);
             CREATE TABLE IF NOT EXISTS messages(
               id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, sender TEXT NOT NULL,
               recipient TEXT NOT NULL DEFAULT '', text TEXT NOT NULL);
@@ -71,8 +71,12 @@ def db() -> sqlite3.Connection:
               id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, username TEXT NOT NULL,
               kind TEXT NOT NULL, message TEXT NOT NULL, acks TEXT NOT NULL DEFAULT '[]', resolved REAL);
             CREATE INDEX IF NOT EXISTS hr_idx ON hr_hist(username, ts);
+            CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
             """
         )
+        # identificador de ESTA base de datos: si cambia (se borró o es otra), los teléfonos y la consola
+        # tiran su caché del chat y lo vuelven a bajar completo
+        _db.execute("INSERT OR IGNORE INTO meta VALUES('server_id', ?)", (secrets.token_hex(8),))
         _db.commit()
     return _db
 
@@ -138,11 +142,13 @@ def crew_snapshot() -> list[dict]:
         hist = [round(r["hr"]) for r in q(
             "SELECT hr FROM hr_hist WHERE username=? AND ts>? ORDER BY ts", (u["username"], now - 300))]
         out.append({**public_user(u), "online": bool(st and now - st["updated"] < ONLINE_SEC),
-                    "last_seen": st["updated"] if st else None, "device": st["device"] if st else "", "ip": st["ip"] if st else "", "status": data, "hr_hist": hist[-60:]})
+                    "last_seen": st["updated"] if st else None, "device": st["device"] if st else "",
+                    "ip": st["ip"] if st else "", "status": data, "hr_hist": hist[-60:]})
     return out
 
 
 def devices_snapshot() -> list[dict]:
+    """Cada teléfono que ha iniciado sesión en la última semana (para «Dispositivos conectados»)."""
     now = time.time()
     out = []
     for r in q("SELECT d.*, u.name, u.callsign FROM devices d LEFT JOIN users u ON u.username=d.username "
@@ -347,7 +353,11 @@ class Handler(BaseHTTPRequestHandler):
         since_a = int(d.get("since_alert") or 0)
         alerts = q("SELECT * FROM alerts WHERE id>? OR (resolved IS NULL AND ts>?) ORDER BY id DESC LIMIT 50",
                    (since_a, now - 3600))
-        self.reply({"ok": True, "now": now, "me": public_user(u), "crew": crew_snapshot(), "devices": devices_snapshot() if u["kind"] == "control" else [], "public": PUBLIC["url"],
+        last = q("SELECT COALESCE(MAX(id), 0) AS m FROM messages", one=True)["m"]
+        sid = q("SELECT v FROM meta WHERE k='server_id'", one=True)["v"]
+        self.reply({"ok": True, "now": now, "me": public_user(u), "crew": crew_snapshot(),
+                    "server_id": sid, "last_msg_id": last,
+                    "devices": devices_snapshot() if u["kind"] == "control" else [], "public": PUBLIC["url"],
                     "messages": visible_messages(u["username"], u["kind"], since_m),
                     "alerts": [alert_dict(r) for r in reversed(alerts)]})
 

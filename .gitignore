@@ -4,3 +4,12 @@ __pycache__/
 *.pyc
 data/alerts_log.jsonl
 data/live_watch_telemetry.json*
+data/fleet/
+crew_server/data/
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+build/
+dist/
+datos/
