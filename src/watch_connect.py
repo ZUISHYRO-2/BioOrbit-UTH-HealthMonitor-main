@@ -91,5 +91,5 @@ def main() -> None:
         manager.disconnect()
 
 
-if __name__ == "__main_____":
+if __name__ == "__main__":
     main()

@@ -13,12 +13,14 @@ Qué es real y qué es simulado (el HUD lo indica en pantalla):
   - Alerta por pérdida de signos vitales: usa esa telemetría (tecla S para simularla).
   - Luma: robot compañero; su ánimo cambia con tu estado y te mira. Para conversar: streamlit run src/app.py
 
-Teclas: S simular pérdida · C estoy bien · B respiración · P pausa · A/D tiempo · N astronauta · Q salir
+Botones (clic): Conectar reloj · Demo reloj · Desconectar
+Teclas: W reloj · S simular pérdida · C estoy bien · B respiración · P pausa · A/D tiempo · N astronauta · Q salir
 """
 
 import math
 import os
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -287,6 +289,114 @@ def draw_lock(frame, box, color, now, t_lock, label, text):
     text(fx + fw // 2, ly, "Fijando rostro…" if k < 1 else label, 14, color, True, "ms")
 
 
+# ------------------------------------------------------------------ botones del reloj
+class WatchControl:
+    """Botones del HUD para conectar el reloj por Bluetooth sin usar la terminal.
+
+    «Conectar reloj» escanea 10 s y se conecta solo al mejor candidato: primero el que anuncia el
+    perfil cardíaco (BioOrbit Watch Bridge lo anuncia), luego relojes por nombre y por señal.
+    """
+
+    BTN_MAIN = (650, 24, 196, 40)
+    BTN_DEMO = (856, 24, 96, 40)
+
+    def __init__(self):
+        self.busy, self.msg, self.msg_t = False, "", 0.0
+        self.hover = (-1, -1)
+
+    @staticmethod
+    def _mgr():
+        return ble_watch.get_watch_manager()
+
+    def own_active(self):
+        return self._mgr().get_snapshot().mode in ("ble_live", "ble_connecting", "wear_sim")
+
+    def say(self, msg):
+        self.msg, self.msg_t = msg, time.time()
+        print(f"[BioOrbit HUD] Reloj: {msg}")
+
+    def connect(self):
+        if self.busy:
+            return
+        if not ble_watch.BLEAK_AVAILABLE:
+            self.say("Falta la librería bleak: pip install -r requirements.txt (o usa Demo)")
+            return
+        self.busy = True
+        self.say("Buscando reloj por Bluetooth… (10 s)")
+        threading.Thread(target=self._scan_connect, daemon=True).start()
+
+    def _scan_connect(self):
+        try:
+            found = ble_watch.scan_ble_devices_sync(timeout=10.0)
+            cands = [d for d in found if d.has_hr_service or d.is_watch_candidate]
+            if not cands:
+                self.say("No encontré reloj. Abre BioOrbit Watch Bridge y pulsa «Iniciar transmisión».")
+                return
+            best = cands[0]          # ya vienen ordenados: perfil cardíaco > reloj > señal
+            self._mgr().connect_ble(best.address, best.name)
+            self.say(f"Conectando a {best.name}…")
+        except Exception as exc:     # sin adaptador, Bluetooth apagado, permisos...
+            self.say(f"Error de Bluetooth (¿está encendido?): {exc}")
+        finally:
+            self.busy = False
+
+    def demo(self):
+        self._mgr().start_wear_simulator(device_name="Reloj demo (Wear OS)")
+        self.say("Demo de reloj activa: pulso simulado.")
+
+    def disconnect(self):
+        self._mgr().disconnect()
+        self.say("Reloj desconectado.")
+
+    def toggle(self):
+        self.disconnect() if self.own_active() else self.connect()
+
+    @staticmethod
+    def _inside(r, x, y):
+        return r[0] <= x <= r[0] + r[2] and r[1] <= y <= r[1] + r[3]
+
+    def click(self, x, y):
+        if self._inside(self.BTN_MAIN, x, y):
+            self.toggle()
+        elif self._inside(self.BTN_DEMO, x, y) and not self.own_active() and not self.busy:
+            self.demo()
+
+    def status_line(self):
+        snap = self._mgr().get_snapshot()
+        if self.busy or time.time() - self.msg_t < 6:
+            return self.msg
+        if snap.mode == "ble_connecting" or snap.status_message.startswith(("Error BLE", "Conectado por BLE, pero")):
+            return snap.status_message
+        return ""
+
+    def draw(self, frame, text, watch):
+        active = self.own_active()
+        if self.busy:
+            label, col = "Buscando…", WA
+        elif active:
+            label, col = "Desconectar reloj", CR
+        elif watch == "live":
+            label, col = "Reloj en vivo", OK
+        else:
+            label, col = "Conectar reloj", CY
+        x, y, w, h = self.BTN_MAIN
+        hov = self._inside(self.BTN_MAIN, *self.hover)
+        glass(frame, x, y, w, h, col, a=0.85 if hov else 0.7, r=20, thick=2 if hov else 1)
+        dot = OK if watch == "live" else (CR if watch == "lost" else MU)
+        cv2.circle(frame, (x + 22, y + h // 2), 6, bgr(dot), -1, cv2.LINE_AA)
+        text(x + 38, y + 26, label, 14, col, True)
+        if not active and not self.busy:
+            x, y, w, h = self.BTN_DEMO
+            hov = self._inside(self.BTN_DEMO, *self.hover)
+            glass(frame, x, y, w, h, VI, a=0.85 if hov else 0.7, r=20, thick=2 if hov else 1)
+            text(x + w // 2, y + 26, "Demo", 14, VI, True, "ms")
+        line = self.status_line()
+        if line:
+            line = line if len(line) <= 56 else line[:54] + "…"
+            glass(frame, 650, 70, 312, 26, WA if "Error" in line or "No encontré" in line else CY, a=0.8, r=12)
+            text(662, 88, line, 11, TX)
+
+
 # ------------------------------------------------------------------ estado
 def find_csv():
     arg = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--csv=")), None)
@@ -317,6 +427,7 @@ class State:
         self.luma, self.mood = LumaSprite(), "reposo"
         self.msg, self.msg_t, self.msg_i, self.msg_key, self.talk_until = "", 0.0, 0, None, 0.0
         self.fps, self.last_status = 30.0, 0.0
+        self.watchctl = WatchControl()
         print(f"[BioOrbit HUD] Telemetría simulada: {self.csv_name} · {self.crew}")
 
     def set_crew(self, crew):
@@ -442,7 +553,8 @@ def draw_hud(frame, S, now, dt):
 
     # Barra superior
     text(28, 48, "BioOrbit", 28, CY, True)
-    text(184, 48, f"UTH · NASA Space Apps 2026 · demostración · {S.csv_name}", 13, MU)
+    text(184, 48, f"UTH · NASA Space Apps 2026 · {S.csv_name}", 13, MU)
+    S.watchctl.draw(frame, text, S.watch)
     glass(frame, W - 310, 22, 286, 44, chip_col, a=0.7, r=22)
     cv2.circle(frame, (W - 286, 44), 6, bgr(chip_col), -1, cv2.LINE_AA)
     text(W - 270, 50, f"{S.crew} · {chip_txt}", 15, chip_col, True)
@@ -516,7 +628,7 @@ def draw_hud(frame, S, now, dt):
     # Señal rPPG
     glass(frame, 478, H - 196, W - 502, 172, CY)
     text(498, H - 166, "Señal rPPG (frente)", 15, TX, True)
-    text(W - 44, H - 166, "S pérdida · C estoy bien · B respiración · P pausa · A/D tiempo · N astronauta · Q salir",
+    text(W - 44, H - 166, "W reloj · S pérdida · C estoy bien · B respiración · P pausa · A/D · N astronauta · Q salir",
          11, MU, False, "rs")
     x0, x1, ym = 498, W - 44, H - 98
     if len(S.wave) > 10 and S.face:
@@ -587,9 +699,17 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
     title = f"BioOrbit-UTH · cámara {idx}"
     cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_MOUSEMOVE:
+            S.watchctl.hover = (x, y)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            S.watchctl.click(x, y)
+
+    cv2.setMouseCallback(title, on_mouse)
     prev = time.time()
-    print(f"[BioOrbit HUD] Cámara {idx} lista. Teclas: S pérdida · C estoy bien · B respiración · "
-          "P pausa · A/D tiempo · N astronauta · Q salir")
+    print(f"[BioOrbit HUD] Cámara {idx} lista. Clic en «Conectar reloj» o tecla W para el reloj. "
+          "Teclas: S pérdida · C estoy bien · B respiración · P pausa · A/D tiempo · N astronauta · Q salir")
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -624,9 +744,13 @@ def main():
         elif k in (ord("a"), ord("A")):
             S.i = max(S.i - 5, 0)
             S.refresh()
+        elif k in (ord("w"), ord("W")):
+            S.watchctl.toggle()
         elif k in (ord("n"), ord("N")):
             S.set_crew(S.crews[(S.crews.index(S.crew) + 1) % len(S.crews)])
             S.em, S.sent = alerts.Emergency(), None
+    if S.watchctl.own_active():      # al salir se desconecta el reloj (sin falsa alarma)
+        S.watchctl.disconnect()
     cap.release()
     cv2.destroyAllWindows()
 

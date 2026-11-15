@@ -25,13 +25,11 @@ from collections import deque
 from dataclasses import dataclass, asdict
 from typing import Any, Deque, Dict, List, Optional
 
-try:
-    from bleak import BleakClient, BleakScanner
-    BLEAK_AVAILABLE = True
-except ImportError:
-    BleakClient = None
-    BleakScanner = None
-    BLEAK_AVAILABLE = False
+import importlib.util
+
+# bleak se importa solo cuando se usa el Bluetooth: si falla (versión de Python sin soporte,
+# sin adaptador), el HUD y la consola siguen funcionando y muestran el error.
+BLEAK_AVAILABLE = importlib.util.find_spec("bleak") is not None
 
 
 # UUIDs estándar Bluetooth SIG GATT
@@ -171,6 +169,8 @@ def scan_ble_devices_sync(timeout: float = 5.0, include_unnamed: bool = False) -
     """Escanea dispositivos Bluetooth LE cercanos de manera síncrona."""
     if not BLEAK_AVAILABLE:
         raise RuntimeError("La librería 'bleak' no está instalada en el entorno Python.")
+
+    from bleak import BleakScanner
 
     async def _scan():
         discovered = await BleakScanner.discover(timeout=timeout, return_adv=True)
@@ -357,6 +357,8 @@ class BLEWatchManager:
 
     async def _async_ble_worker(self, address: str, device_name: str) -> None:
         try:
+            from bleak import BleakClient
+
             async with BleakClient(address, timeout=12.0) as client:
                 services = [f"{s.uuid} ({s.description})" for s in client.services]
                 char_uuids = {

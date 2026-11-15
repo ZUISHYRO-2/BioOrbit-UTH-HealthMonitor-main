@@ -52,7 +52,9 @@ La frecuencia cardíaca puede venir de un **reloj real** en lugar del CSV simula
 1. **En el reloj (Pixel Watch / Wear OS):** instala la app `wear-os-bridge/` (ábrela en Android Studio y córrela en el reloj).
    Abre **BioOrbit Watch Bridge**, pulsa **Iniciar transmisión** y acepta los permisos. El reloj anuncia el perfil
    estándar Bluetooth *Heart Rate* (0x180D) con tu pulso cada segundo.
-2. **En la laptop**, conéctalo de una de dos formas:
+2. **En la laptop**, conéctalo de cualquiera de estas formas:
+   - **HUD de cámara** → botón **Conectar reloj** arriba (o tecla **W**): busca 10 s y se conecta solo al reloj.
+     El botón **Demo** simula un reloj; **Desconectar reloj** lo suelta.
    - Consola web → barra lateral → **Buscar relojes cercanos** → elige el reloj → **Conectar reloj**.
    - Terminal: `python src/watch_connect.py` (Q o Esc para desconectar).
 3. El HUD de cámara y la consola leen el reloj solos (archivo `data/live_watch_telemetry.json`).
@@ -159,6 +161,7 @@ python src/vision_monitor.py 0 ASTRO-01 --csv=data/sample_astronaut_telemetry.cs
 | **B** | Respiración guiada (Luma pasa a calma) |
 | **P** | Pausar / reanudar la telemetría |
 | **A / D** | Retroceder / avanzar en la misión |
+| **W** | Conectar / desconectar el reloj (igual que el botón) |
 | **N** | Siguiente astronauta |
 | **Q / Esc** | Salir |
 
