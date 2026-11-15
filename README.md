@@ -1,4 +1,4 @@
-# BioOrbit-UTH / Astronaut Health & Dev 🚀
+# BioOrbit-UTH / Astronaut Health Monitor
 **NASA Space Apps Challenge 2026 — Sede Hermosillo, Sonora, México**  
 **Desafío Oficial:** *Create Health Monitoring Software for Astronauts on Space Missions*  
 **Equipo:** BioOrbit UTH (`yovani28`, líder mecatrónico)
@@ -7,17 +7,17 @@
 
 ## 🛰️ Resumen del Proyecto
 
-Durante misiones de espacio profundo hacia la Luna y Marte, las tripulaciones enfrentan ambientes hostiles caracterizados por microgravedad constante, radiación ionizante acumulada, confinamiento y estrés fisiológico. Debido a los retrasos en las comunicaciones tierra-espacio (hasta 20 minutos en Marte), los astronautas requieren autonomía médica inmediata para monitorear, diagnosticar y responder a riesgos de salud sin asistencia en tiempo real de los cirujanos de vuelo.
+**BioOrbit-UTH** es un prototipo educativo de monitoreo de salud para tripulaciones. Integra:
+1. **Telemetría fisiológica:** reproducción de CSV y conexión opcional a reloj BLE para frecuencia cardíaca.
+2. **Indicadores de riesgo:** cálculo de índices cardiovasculares, recuperación autonómica y riesgo ambiental a partir de las señales disponibles.
+3. **HUD de cámara:** detección de rostro y estimación experimental del pulso por rPPG con OpenCV.
+4. **Centro de control:** dashboard Streamlit para visualizar varios astronautas, dispositivos, gráficas e historial de alertas.
 
-**BioOrbit-UTH** es una plataforma de software distribuida y predictiva que integra:
-1. **Pipeline de Telemetría Fisiológica:** Ingesta de bioseñales clave (Frecuencia Cardíaca, Variabilidad de Frecuencia Cardíaca - HRV RMSSD, SpO2, Temperatura y Dosimetría de Radiación).
-2. **Motor de Inferencia de Riesgo Multivariable:** Algoritmos que calculan índices compuestos de estrés cardiovascular, recuperación autonómica y amenaza ambiental.
-3. **Monitor Óptico en Cabina (OpenCV):** Detección sin contacto de fatiga visual, microexpresiones de estrés y desalineación postural durante ejercicios en microgravedad.
-4. **Consola Táctica de Cabina:** Dashboard interactivo optimizado para alta visibilidad y toma de decisiones preventiva.
+La mayor parte de la telemetría incluida es sintética. El proyecto no está validado clínicamente y no debe usarse para diagnóstico ni decisiones médicas.
 
 ---
 
-## 🤖 Luma, el compañero a bordo (nuevo)
+## 🤖 Luma, el compañero a bordo
 
 Luma es un pequeño robot flotante (diseño original del equipo) que acompaña a la tripulación en el
 aislamiento de una misión larga. Tiene 5 estados de ánimo que cambian solos según la situación:
@@ -45,28 +45,12 @@ El HUD detecta tu cara con OpenCV (dos modelos Haar, imagen ecualizada) y la **d
 sobre tu rostro, con anillo giratorio y barrido. Una vez fijada, sigue a esa misma cara e ignora detecciones falsas de un
 instante; solo cambia de cara si la otra persiste ~0.5 s. Sobre esa región mide el pulso por rPPG.
 
-## 🛰️ Centro de control multi-astronauta (nuevo)
+## 🛰️ Centro de control multi-astronauta
 
-La primera pestaña de la consola (`streamlit run src/app.py`) muestra a **toda la tripulación a la vez**: una tarjeta por
-astronauta (estado, FC, SpO₂, HRV, temperatura, ánimo de Luma, dispositivos conectados), los más urgentes primero, gráficas
-comparativas, tabla de dispositivos con su estado (en línea / retrasado / sin señal) e historial de avisos. Las alertas por
-pérdida de signos vitales ahora se vigilan para **todos** los astronautas, no solo el que estás monitoreando.
-Los teléfonos se enlazan con `python crew_server/server.py` y otras laptops con `python src/fleet_server.py`; detalles en [`docs/fleet_api.md`](docs/fleet_api.md).
-
-La consola y los teléfonos están **enlazados en los dos sentidos**: la consola ve el estado y las alertas de cada teléfono,
-y en la pestaña **Chat de tripulación** el control de misión escribe a todos o en privado. Las alertas que detecta la consola
-(pérdida de signos, apoyo humano) llegan también a los teléfonos y se cierran solas cuando vuelven las señales.
-
-## 📱 App para teléfono y servidor de tripulación (nuevo)
-
-- **App Android** (`android-app/`): Luma por voz (escucha permanente, IA opcional con tu propia clave), cámara con pulso y
-  alerta «nadie en cámara», reloj por Bluetooth, SOS por voz, música por voz y funcionamiento en segundo plano.
-- **Cuentas de astronauta:** cada quien inicia sesión en su teléfono (mientras está el login, todo lo demás queda apagado).
-- **Pestaña Equipo:** quién está en línea, su pulso y alertas («Voy en camino»), chat general, privado y con Control.
-  Por voz: «dile a Ana que ya voy», «¿tengo mensajes?».
-- **Servidor de tripulación** (`crew_server/`): guarda cuentas y chat, y sirve un **dashboard web** en `http://localhost:8765`
-  con tarjetas por astronauta, **Dispositivos conectados**, alertas y chat. En el mismo Wi-Fi los teléfonos lo encuentran solos;
-  con datos móviles se usa un túnel https (`crew_server/tunel.py`). Detalles en [`crew_server/README.md`](crew_server/README.md).
+La consola (`src/app.py`) muestra una tarjeta por astronauta, compara sus señales y presenta dispositivos y alertas. Los datos
+locales proceden del CSV seleccionado y de los puentes de reloj/cámara. Para recibir reportes de otras laptops se puede
+iniciar `src/fleet_server.py`; para el servidor opcional de teléfonos, chat y alertas, se puede iniciar
+`crew_server/server.py`. Consulta [`docs/fleet_api.md`](docs/fleet_api.md) para configuración y puertos.
 
 ## ⌚ Reloj inteligente por Bluetooth (nuevo)
 
@@ -93,7 +77,7 @@ El Pixel Watch solo manda frecuencia cardíaca (sin intervalos RR), así que la 
 con una banda o reloj que mande intervalos RR, la HRV se calcula en vivo (RMSSD). Funciona con cualquier dispositivo
 que tenga el perfil cardíaco estándar (bandas Polar, Garmin, etc.). En Windows usa el Bluetooth de la laptop (librería `bleak`).
 
-Pruebas: `python -m unittest tests.test_ble_watch`
+Pruebas: `python -m unittest discover -s tests -v`
 
 ## 🚨 Alerta a tripulantes cercanos
 
@@ -108,21 +92,22 @@ Si nadie la cancela, avisa a los tripulantes dentro del radio configurado por re
 
 ---
 
-## 📊 Fuentes de Datos Abiertas de la NASA Utilizadas
+## 📊 Fuentes de referencia
 
-- **[NASA Open Science Data Repository (OSDR)](https://science.nasa.gov/biological-physical/data/osdr/):** Parámetros de referencia omicos y biomarcadores de astronautas en misiones de larga duración.
-- **[NASA Life Sciences Portal (NLSP / LSDA)](https://www.nasa.gov/hrp/nlsp/):** Datos fisiológicos de misiones análogas de reposo en cama (*bedrest studies*) y telemetría histórica de la ISS.
-- **[NASA Open APIs](https://api.nasa.gov/):** Variables de radiación y clima espacial para correlación ambiental.
+- **[NASA Open Science Data Repository (OSDR)](https://science.nasa.gov/biological-physical/data/osdr/)**
+- **[NASA Life Sciences Portal (NLSP / LSDA)](https://www.nasa.gov/hrp/nlsp/)**
+- **[NASA Open APIs](https://api.nasa.gov/)**
+
+Estas fuentes sirven como referencia; el proyecto no descarga ni integra sus datasets o APIs durante la ejecución. Los CSV incluidos son sintéticos.
 
 ---
 
-## 🛠️ Arquitectura de Software y Stack Tecnológico
+## 🛠️ Tecnologías
 
-El proyecto sigue las directrices técnicas de ingeniería y digitalización de `@gemini-spark-instructions`:
-- **Entorno de Programación:** Python 3.10+ en VS Code.
-- **Procesamiento de Bioseñales:** `pandas`, `numpy`, `scipy`.
-- **Visión Computacional:** `OpenCV` (detección óptica de fatiga y monitoreo biomecánico).
-- **Consola / UI:** Streamlit / Plotly con interfaz táctil en modo nocturno de baja luminancia para cabina espacial.
+- Python 3.10 o superior; probado como aplicación local en Windows.
+- `pandas` y `numpy` para telemetría y cálculos; `OpenCV` y Pillow para el HUD.
+- Streamlit y Plotly para la consola; `bleak` para Bluetooth Low Energy.
+- El servidor de tripulación (`crew_server/`) usa la biblioteca estándar de Python y SQLite.
 
 ---
 
@@ -130,9 +115,9 @@ El proyecto sigue las directrices técnicas de ingeniería y digitalización de 
 
 ```text
 BioOrbit-UTH-HealthMonitor/
-├── .streamlit/config.toml               # Tema oscuro de la consola
+├── .streamlit/config.toml               # Tema de Streamlit
 ├── data/
-│   ├── demo_stress_arc.csv              # Escenario simulado para el demo (4 astronautas; ASTRO-02 se desgasta)
+│   ├── demo_stress_arc.csv              # Escenario simulado para el demo (ASTRO-02 se desgasta)
 │   └── sample_astronaut_telemetry.csv   # Telemetría simulada (4 tripulantes)
 ├── src/
 │   ├── app.py                           # Consola de cabina (Streamlit) + Luma + WHO-5
@@ -144,16 +129,10 @@ BioOrbit-UTH-HealthMonitor/
 │   ├── ble_watch.py                     # Reloj por Bluetooth LE: escaneo, conexión, pulso, HRV
 │   ├── watch_connect.py                 # Conectar el reloj desde la terminal
 │   ├── data_pipeline.py                 # Pipeline de ingesta, HRV, alertas y dosis de radiación
-│   ├── generate_demo_data.py            # Genera demo_stress_arc.csv
-│   ├── crew_link.py                     # Enlace consola <-> teléfonos (estado, alertas, chat)
-│   ├── fleet.py / fleet_server.py       # Dispositivos: reloj, HUD de otras laptops (puerto 8766)
-│   └── luma_avatar.py                   # Avatar de Luma
-├── crew_server/                         # Servidor de tripulación: cuentas, chat, alertas, dashboard web (8765)
-├── android-app/                         # App del teléfono (APK): Luma, cámara, reloj, alertas, pestaña Equipo
-├── tests/                               # Pruebas: reloj, dispositivos, enlace con teléfonos
+│   └── generate_demo_data.py            # Genera demo_stress_arc.csv
+├── tests/test_ble_watch.py              # Pruebas del conector del reloj
 ├── wear-os-bridge/                      # App para el reloj (Kotlin): transmite el pulso por BLE
 ├── docs/
-│   ├── fleet_api.md                     # Cómo se conecta cada dispositivo
 │   ├── pitch_script_30s.md              # Guion de pitch de 30 segundos en inglés
 │   └── vista_previa_hud.png             # Captura del HUD
 ├── requirements.txt
@@ -164,25 +143,99 @@ BioOrbit-UTH-HealthMonitor/
 
 ## 🚀 Guía de Instalación y Ejecución Rápida
 
-### 1. Clonar y preparar entorno
-```bash
-git clone https://github.com/yovani28/BioOrbit-UTH-HealthMonitor.git
-cd BioOrbit-UTH-HealthMonitor
-python3 -m venv venv
-source venv/bin/activate  # En Windows: venv\Scripts\activate
-pip install -r requirements.txt
+### 1. Preparar el entorno en Windows
+
+Abre PowerShell en la carpeta del proyecto:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### 2. Ejecutar el Pipeline de Telemetría Biomédica
-```bash
-python src/data_pipeline.py data/sample_astronaut_telemetry.csv
+Deja que `pip` termine; si la instalación se cancela, vuelve a ejecutar el último comando antes de iniciar la app.
+
+Si PowerShell bloquea la activación del entorno, permite scripts solo para esa sesión y actívalo de nuevo:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 ```
 
-### 3. HUD de cámara con Luma
-```bash
-python src/vision_monitor.py                      # cámara automática, demo_stress_arc.csv, ASTRO-02
-python src/vision_monitor.py 0 ASTRO-01 --csv=data/sample_astronaut_telemetry.csv
+### 2. Iniciar la consola principal
+
+Con `.venv` activo:
+
+```powershell
+python -m streamlit run src\app.py
 ```
+
+Abre la URL que muestra Streamlit, normalmente `http://localhost:8501`. La consola reproduce telemetría de los CSV;
+no requiere reloj ni cámara. En la barra lateral puedes usar **Demo reloj** para simular una conexión.
+
+### 3. Iniciar el HUD de cámara (opcional)
+
+Abre una segunda terminal en la carpeta del proyecto y activa `.venv` en ella:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python src\vision_monitor.py
+```
+
+Permite el acceso a la cámara si Windows lo solicita. Para elegir cámara, astronauta o CSV:
+
+```powershell
+python src\vision_monitor.py 0 ASTRO-01 --csv=data\sample_astronaut_telemetry.csv
+```
+
+El pulso rPPG es experimental. SpO₂, temperatura, CO₂, radiación, HRV y sueño provienen del CSV si un dispositivo real no los proporciona.
+
+### 4. Conectar un reloj BLE (opcional)
+
+En un reloj Wear OS compatible, instala y abre `wear-os-bridge/`, pulsa **Iniciar transmisión** y acepta los permisos.
+Después, desde la barra lateral del dashboard pulsa **Buscar relojes cercanos** y **Conectar reloj**. También puedes
+conectar desde el HUD o usar el cliente de terminal:
+
+```powershell
+python src\watch_connect.py
+```
+
+El cliente de terminal es una alternativa de conexión; para usar el reloj en el dashboard, conéctalo desde el dashboard.
+
+### 5. Servicios adicionales (opcionales)
+
+Para recibir reportes de otras laptops en la misma red, abre otra terminal, activa `.venv` y ejecuta:
+
+```powershell
+python src\fleet_server.py
+```
+
+Para el servidor de tripulación (cuentas, chat y alertas de teléfonos), abre otra terminal y ejecuta:
+
+```powershell
+python crew_server\server.py
+```
+
+Sus puertos y configuración están descritos en [`docs/fleet_api.md`](docs/fleet_api.md) y [`crew_server/README.md`](crew_server/README.md).
+No expongas estos servicios a Internet sin una configuración de seguridad adecuada.
+
+### 6. Pipeline y pruebas
+
+Procesar una muestra desde la terminal:
+
+```powershell
+python src\data_pipeline.py data\sample_astronaut_telemetry.csv
+```
+
+Ejecutar las pruebas:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+### Teclas del HUD
+
 | Tecla | Acción |
 |---|---|
 | **S** | Simular pérdida de signos vitales |
@@ -202,21 +255,6 @@ radiación, HRV y sueño son telemetría simulada del CSV y el HUD lo indica.
 streamlit run src/app.py
 ```
 Se pueden correr los dos a la vez: la consola muestra en la barra lateral si el HUD está conectado y el pulso que mide la cámara.
-
-### 5. Teléfonos de la tripulación
-```bash
-python crew_server/server.py          # en otra terminal; la primera vez crea la contraseña de «control»
-```
-1. Instala el APK de `android-app/` en cada teléfono (Android Studio → Build → Generate APKs).
-2. En la app: **Crear cuenta** (nombre, puesto ASTRO-01…04, usuario y contraseña). En el mismo Wi-Fi el servidor aparece solo.
-3. La consola (`streamlit run src/app.py`) entra sola como «control»: tarjetas de cada teléfono en **Centro de control** y
-   chat en **Chat de tripulación**. También está el dashboard web en `http://localhost:8765`.
-4. Windows Firewall: permite Python en **redes privadas**, si no, los teléfonos no se conectan.
-
-### 6. Pruebas
-```bash
-python -m pytest tests -q
-```
 
 ---
 
