@@ -50,6 +50,7 @@ La dirección cambia cada vez que abres el túnel.
 | Lista de la tripulación: en línea, pulso, si está en cámara, alertas | Tarjeta por astronauta con pulso, SpO₂, temperatura y gráfica de 5 min |
 | Chat general, privado con cada compañero y con Control | Chat con todos o privado; ve todos los mensajes |
 | Alertas de los demás con «Voy en camino» / «No puedo ir» | Alertas con sonido, quién va en camino, «Marcar resuelta» |
+| — | Catálogo de estudios OSDR con búsqueda y paginación |
 | Por voz: «dile a Beto que ya voy», «manda un mensaje a la tripulación: …», «¿tengo mensajes?» | Quitar cuentas |
 
 - Las alertas (sin signos vitales, nadie en cámara, SOS por voz, apoyo humano) también se siguen
@@ -57,6 +58,8 @@ La dirección cambia cada vez que abres el túnel.
 - Cuando la persona toca «Estoy bien», su alerta se cierra sola en todos lados.
 - Contraseñas guardadas con PBKDF2 (nunca en texto plano). En el Wi-Fi la conexión es http;
   por datos móviles va cifrada (https del túnel).
+- En el dashboard de control, abre **Catálogo OSDR de referencia** para buscar estudios. Es metadato
+  de investigación, no telemetría, y solo se entrega a una sesión autenticada de Control.
 
 ## Opciones
 

@@ -15,6 +15,7 @@ Con datos móviles: abre un túnel (ver README) y escribe en la app la direcció
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import hmac
 import json
@@ -27,13 +28,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 VERSION = "1.0"
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 DB_PATH = DATA / "crew.db"
 DASHBOARD = HERE / "dashboard.html"
+OSDR_CATALOG = HERE.parent / "data" / "osdr_catalog.csv"
 BEACON_PORT = 50506
 ONLINE_SEC = 15          # sin sincronizar en 15 s = desconectado
 ROLES = ("astronauta", "control")
@@ -177,6 +179,32 @@ def visible_messages(user: str, kind: str, since: int, limit=200):
     return [msg_dict(r) for r in reversed(rows)]
 
 
+def osdr_catalog_page(query: str = "", offset: int = 0, limit: int = 25) -> dict:
+    if offset < 0 or not 1 <= limit <= 100:
+        raise ValueError("paginación fuera de rango")
+    if not OSDR_CATALOG.is_file():
+        raise FileNotFoundError(OSDR_CATALOG)
+
+    needle = query.strip().casefold()
+    with OSDR_CATALOG.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        columns = reader.fieldnames
+        if not columns or any(not column for column in columns):
+            raise ValueError("el CSV no contiene encabezados válidos")
+
+        rows = []
+        total = 0
+        for row in reader:
+            values = [value for value in row.values() if value is not None]
+            if needle and not any(needle in value.casefold() for value in values):
+                continue
+            if total >= offset and len(rows) < limit:
+                rows.append({column: row.get(column) or "" for column in columns})
+            total += 1
+
+    return {"columns": columns, "rows": rows, "total": total, "offset": offset, "limit": limit}
+
+
 # ------------------------------------------------------------------ HTTP
 class Handler(BaseHTTPRequestHandler):
     server_version = "BioOrbitCrew/" + VERSION
@@ -245,6 +273,28 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ping":
             self.reply({"ok": True, "app": "bioorbit-crew", "version": VERSION, "lan": lan_urls(self.server.server_port),
                         "public": PUBLIC["url"]})
+        elif path == "/api/osdr/catalog":
+            user = self.auth()
+            if not user:
+                return self.err("Inicia sesión para consultar el catálogo.", 401)
+            if user["kind"] != "control":
+                return self.err("Solo el control de misión puede consultar el catálogo.", 403)
+            params = parse_qs(urlparse(self.path).query)
+            try:
+                offset = int(params.get("offset", ["0"])[0])
+                limit = int(params.get("limit", ["25"])[0])
+                query = params.get("q", [""])[0]
+                if len(query) > 100:
+                    return self.err("La búsqueda no puede superar 100 caracteres.")
+                self.reply(osdr_catalog_page(query, offset, limit))
+            except ValueError as e:
+                self.err(str(e))
+            except FileNotFoundError as e:
+                print("no se pudo leer el catálogo OSDR:", repr(e), file=sys.stderr)
+                self.err("No se encontró data/osdr_catalog.csv.", 404)
+            except (OSError, csv.Error, UnicodeError) as e:
+                print("no se pudo leer el catálogo OSDR:", repr(e), file=sys.stderr)
+                self.err("No se pudo leer el catálogo OSDR.", 500)
         else:
             self.err("no existe", 404)
 

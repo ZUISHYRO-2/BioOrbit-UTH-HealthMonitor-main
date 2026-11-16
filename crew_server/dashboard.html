@@ -74,6 +74,20 @@ canvas.spark{width:100%;height:42px}
 .dev .r{text-align:right}
 .dev .tag{display:inline-block;border:1px solid var(--ln);border-radius:999px;padding:0 7px;font-size:10px;color:var(--mu);margin-left:4px}
 .dev .tag.ok{color:var(--ok);border-color:var(--ok)}
+/* catálogo OSDR */
+.osdr-panel{max-height:42vh;overflow:auto}
+.osdr-panel summary{cursor:pointer;list-style:none}
+.osdr-panel summary::-webkit-details-marker{display:none}
+.osdr-panel summary:focus-visible,#osdrSearch:focus-visible,#osdrPrev:focus-visible,#osdrNext:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.osdr-note,#osdrStatus{font-size:12px;color:var(--mu);margin:8px 0}
+#osdrSearchForm{display:flex;gap:8px}
+#osdrSearch{min-width:0;flex:1}
+.osdr-table-wrap{max-height:240px;overflow:auto;margin-top:8px}
+#osdrTable{width:100%;border-collapse:collapse;font-size:11px}
+#osdrTable th,#osdrTable td{padding:7px 8px;border-bottom:1px solid var(--ln);text-align:left;vertical-align:top}
+#osdrTable th{position:sticky;top:0;background:#111735;color:var(--cy)}
+#osdrTable td{max-width:260px}
+.osdr-pages{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:12px;color:var(--mu)}
 /* alertas */
 #alerts{display:flex;flex-direction:column;gap:8px;max-height:30vh;overflow:auto}
 .al{border-radius:12px;padding:10px 12px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.45)}
@@ -127,6 +141,25 @@ canvas.spark{width:100%;height:42px}
     <section class="col">
       <div class="ttl">Tripulación</div>
       <div id="crew"><div class="empty">Aún no hay astronautas. Crea las cuentas desde la app del teléfono.</div></div>
+      <details class="panel osdr-panel" id="osdrPanel">
+        <summary class="ttl">Catálogo OSDR de referencia</summary>
+        <p class="osdr-note">Metadatos de estudios; no son telemetría biométrica ni alimentan alertas.</p>
+        <form id="osdrSearchForm">
+          <input id="osdrSearch" type="search" maxlength="100" placeholder="Buscar título, misión, especie…">
+          <button class="btn small">Buscar</button>
+        </form>
+        <div id="osdrStatus" role="status" aria-live="polite">Abre esta sección para cargar los estudios.</div>
+        <div id="osdrResults" class="hidden">
+          <div class="osdr-table-wrap">
+            <table id="osdrTable"></table>
+          </div>
+          <div class="osdr-pages">
+            <button class="btn small" id="osdrPrev" type="button">Anterior</button>
+            <span id="osdrPage"></span>
+            <button class="btn small" id="osdrNext" type="button">Siguiente</button>
+          </div>
+        </div>
+      </details>
     </section>
     <section class="col">
       <div class="panel">
@@ -162,6 +195,14 @@ canvas.spark{width:100%;height:42px}
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.token }, body: JSON.stringify(body || {}) });
     const j = await r.json().catch(() => ({ ok: false, error: 'respuesta inválida' }));
     if (r.status === 401 && path !== '/api/login') { logout(); }
+    if (!j.ok) throw new Error(j.error || 'error');
+    return j;
+  }
+
+  async function apiGet(path) {
+    const r = await fetch(path, { headers: { Authorization: 'Bearer ' + S.token } });
+    const j = await r.json().catch(() => ({ ok: false, error: 'respuesta inválida' }));
+    if (r.status === 401) logout();
     if (!j.ok) throw new Error(j.error || 'error');
     return j;
   }
@@ -362,6 +403,52 @@ canvas.spark{width:100%;height:42px}
     $('chatTxt').value = '';
     try { await api('/api/chat', { text: t, to: S.chan }); sync(); } catch (err) { alert(err.message); $('chatTxt').value = t; }
   };
+
+  const OSDR_PAGE_SIZE = 25;
+  let osdrQuery = '', osdrOffset = 0, osdrTotal = 0, osdrLoaded = false;
+  async function loadOsdrCatalog() {
+    const status = $('osdrStatus');
+    status.textContent = 'Cargando catálogo…';
+    const params = new URLSearchParams({ q: osdrQuery, offset: String(osdrOffset), limit: String(OSDR_PAGE_SIZE) });
+    try {
+      const page = await apiGet('/api/osdr/catalog?' + params.toString());
+      osdrLoaded = true;
+      osdrTotal = page.total;
+      const table = $('osdrTable');
+      table.textContent = '';
+      const head = document.createElement('thead'), headRow = document.createElement('tr');
+      for (const column of page.columns) headRow.append(el('th', '', column));
+      head.append(headRow);
+      const body = document.createElement('tbody');
+      for (const row of page.rows) {
+        const tr = document.createElement('tr');
+        for (const column of page.columns) tr.append(el('td', '', row[column]));
+        body.append(tr);
+      }
+      table.append(head, body);
+      $('osdrResults').classList.remove('hidden');
+      const start = page.total ? page.offset + 1 : 0;
+      const end = page.offset + page.rows.length;
+      status.textContent = `${page.total.toLocaleString('es-MX')} estudios encontrados`;
+      $('osdrPage').textContent = `${start}–${end} de ${page.total.toLocaleString('es-MX')}`;
+      $('osdrPrev').disabled = page.offset === 0;
+      $('osdrNext').disabled = end >= page.total;
+    } catch (err) {
+      status.textContent = err.message;
+      $('osdrResults').classList.add('hidden');
+    }
+  }
+  $('osdrPanel').addEventListener('toggle', () => {
+    if ($('osdrPanel').open && !osdrLoaded) loadOsdrCatalog();
+  });
+  $('osdrSearchForm').onsubmit = e => {
+    e.preventDefault();
+    osdrQuery = $('osdrSearch').value.trim();
+    osdrOffset = 0;
+    loadOsdrCatalog();
+  };
+  $('osdrPrev').onclick = () => { osdrOffset = Math.max(0, osdrOffset - OSDR_PAGE_SIZE); loadOsdrCatalog(); };
+  $('osdrNext').onclick = () => { if (osdrOffset + OSDR_PAGE_SIZE < osdrTotal) { osdrOffset += OSDR_PAGE_SIZE; loadOsdrCatalog(); } };
 
   async function start() {
     $('login').classList.add('hidden'); $('main').classList.remove('hidden');

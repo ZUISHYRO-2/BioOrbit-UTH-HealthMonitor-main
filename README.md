@@ -108,7 +108,8 @@ Si nadie la cancela, avisa a los tripulantes dentro del radio configurado por re
 - **OSDR y LSDA:** descarga un dataset de acceso abierto en formato CSV/TSV desde
   [NASA OSDR](https://osdr.nasa.gov/bio/repo/data/studies/) o [NASA Life Sciences Portal](https://nlsp.nasa.gov/explore),
   y cárgalo en la misma pestaña para ver sus columnas, una muestra y estadísticas numéricas. Se aceptan archivos de hasta 25 MB.
-  El catálogo de estudios `data/osdr_catalog.csv` se conserva en el proyecto y se muestra automáticamente si no cargas otro archivo.
+  El catálogo de estudios `data/osdr_catalog.csv` se conserva en el proyecto y se muestra automáticamente en Streamlit;
+  también está disponible con búsqueda en **Catálogo OSDR de referencia** del dashboard de Control de misión.
 
 Los eventos DONKI son contexto de actividad solar, no mediciones de dosis de radiación ni de salud de la tripulación.
 Los datasets OSDR/LSDA se cargan localmente, se muestran como referencia y no se mezclan automáticamente con las alertas
