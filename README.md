@@ -1,4 +1,5 @@
 # BioOrbit-UTH / Astronaut Health Monitor
+
 **NASA Space Apps Challenge 2026 — Sede Hermosillo, Sonora, México**  
 **Desafío Oficial:** *Create Health Monitoring Software for Astronauts on Space Missions*  
 **Equipo:** BioOrbit UTH (`yovani28`, líder mecatrónico)
@@ -8,6 +9,7 @@
 ## 🛰️ Resumen del Proyecto
 
 **BioOrbit-UTH** es un prototipo educativo de monitoreo de salud para tripulaciones. Integra:
+
 1. **Telemetría fisiológica:** reproducción de CSV y conexión opcional a reloj BLE para frecuencia cardíaca.
 2. **Indicadores de riesgo:** cálculo de índices cardiovasculares, recuperación autonómica y riesgo ambiental a partir de las señales disponibles.
 3. **HUD de cámara:** detección de rostro y estimación experimental del pulso por rPPG con OpenCV.
@@ -24,7 +26,7 @@ Luma es un pequeño robot flotante (diseño original del equipo) que acompaña a
 aislamiento de una misión larga. Tiene 5 estados de ánimo que cambian solos según la situación:
 
 | Estado | Cuándo aparece |
-|---|---|
+| --- | --- |
 | **Reposo** (verde) | Señales estables |
 | **Curioso** (azul) | Desgaste leve o cuando aún no encuentra tu rostro |
 | **Preocupado** (ámbar) | Desgaste alto, pérdida de signos vitales o frases de crisis |
@@ -272,4 +274,5 @@ python -m unittest discover -s tests -v
 
 Prototipo educativo, no dispositivo médico ni servicio de salud mental. Los CSV incluidos son sintéticos; los umbrales no
 son orientación médica y el pulso por cámara es experimental. No usar para diagnóstico, tratamiento ni decisiones clínicas.
-No envíes datos biométricos reales a servicios externos sin consentimiento informado.
+
+### No envíes datos biométricos reales a servicios externos sin consentimiento informado
