@@ -1,6 +1,5 @@
 import csv
 import json
-import sys
 import tempfile
 import threading
 import unittest
@@ -9,9 +8,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "crew_server"))
-import server
+from crew_server import server
 
 
 class CrewServerOsdrTests(unittest.TestCase):
