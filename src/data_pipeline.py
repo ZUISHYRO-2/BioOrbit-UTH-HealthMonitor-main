@@ -7,9 +7,34 @@ Basado en métricas de NASA Open Science Data Repository (OSDR) y Life Sciences 
 import pandas as pd
 import numpy as np
 
+TELEMETRY_COLUMNS = frozenset({
+    "timestamp",
+    "crew_id",
+    "heart_rate_bpm",
+    "hrv_rmssd_ms",
+    "spo2_pct",
+    "systolic_bp_mmhg",
+    "diastolic_bp_mmhg",
+    "body_temp_c",
+    "radiation_rate_usv_h",
+    "cabin_co2_ppm",
+    "sleep_efficiency_pct",
+})
+
+
+def has_telemetry_schema(filepath: str) -> bool:
+    """Indica si el CSV contiene las columnas esperadas de telemetría."""
+    columns = pd.read_csv(filepath, nrows=0).columns
+    return TELEMETRY_COLUMNS.issubset(columns)
+
+
 def load_telemetry(filepath: str) -> pd.DataFrame:
     """Carga y parsea el archivo de telemetría de tripulación."""
     df = pd.read_csv(filepath)
+    missing_columns = TELEMETRY_COLUMNS.difference(df.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"El archivo '{filepath}' no es telemetría válida; faltan columnas: {missing}")
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     return df
 

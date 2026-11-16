@@ -30,7 +30,7 @@ import companion
 import crew_link
 import fleet
 import nasa_data
-from data_pipeline import calculate_health_scores, load_telemetry
+from data_pipeline import calculate_health_scores, has_telemetry_schema, load_telemetry
 from luma import luma_html, pick_mood
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -127,7 +127,7 @@ def cached_nasa_sep_events(start_date, end_date):
     return nasa_data.fetch_sep_events(start_date, end_date)
 
 
-CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv"))
+CSVS = sorted(p.name for p in DATA_DIR.glob("*.csv") if has_telemetry_schema(str(p)))
 
 
 def all_crew() -> list[str]:
