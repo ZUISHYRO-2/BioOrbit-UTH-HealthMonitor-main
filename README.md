@@ -252,7 +252,6 @@ python -m unittest discover -s tests -v
 ### Teclas del HUD
 
 | Tecla | Acción |
-|---|---|
 | **S** | Simular pérdida de signos vitales |
 | **C** | "Estoy bien" (cancela el aviso) |
 | **B** | Respiración guiada |
